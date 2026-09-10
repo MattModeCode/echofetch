@@ -3,7 +3,7 @@
 
 import { isMasterPlaylist, parseMaster, parseMedia, containerFor } from './hls.js';
 
-const CONCURRENCY = 6;
+const DEFAULT_CONCURRENCY = 6;
 const MAX_ATTEMPTS = 3;
 const PROGRESS_INTERVAL_MS = 250;
 
@@ -81,7 +81,7 @@ async function fetchSegment(segment, index, refreshUrls) {
   throw new Error(`Segment ${index + 1} failed after ${MAX_ATTEMPTS} attempts: ${lastError.message}`);
 }
 
-async function runPool(segments, refreshUrls, onProgress) {
+async function runPool(segments, refreshUrls, onProgress, concurrency) {
   const results = new Array(segments.length);
   let nextIndex = 0;
   let done = 0;
@@ -99,12 +99,12 @@ async function runPool(segments, refreshUrls, onProgress) {
     }
   }
 
-  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, segments.length) }, worker));
+  await Promise.all(Array.from({ length: Math.min(concurrency, segments.length) }, worker));
   if (cancelled) throw new Error('cancelled');
   return results;
 }
 
-async function download(variantUrl, jobId) {
+async function download(variantUrl, jobId, kind, concurrency) {
   cancelled = false;
   keyCache.clear();
 
@@ -135,9 +135,9 @@ async function download(variantUrl, jobId) {
 
   const parts = [];
   if (parsed.initSegment) parts.push(await fetchWithSession(parsed.initSegment.url));
-  parts.push(...(await runPool(parsed.segments, refreshUrls, post)));
+  parts.push(...(await runPool(parsed.segments, refreshUrls, post, concurrency)));
 
-  const { extension, mime } = containerFor(parsed);
+  const { extension, mime } = containerFor(parsed, kind);
   const blobUrl = URL.createObjectURL(new Blob(parts, { type: mime }));
   chrome.runtime.sendMessage({ type: 'assembled', jobId, blobUrl, extension });
 }
@@ -150,7 +150,8 @@ chrome.runtime.onMessage.addListener((message) => {
     return false;
   }
   if (message.type === 'download') {
-    download(message.variantUrl, message.jobId).catch((error) => {
+    const concurrency = message.concurrency || DEFAULT_CONCURRENCY;
+    download(message.variantUrl, message.jobId, message.kind || 'video', concurrency).catch((error) => {
       // Stop any sibling workers still in flight before reporting.
       cancelled = true;
       if (error.message === 'cancelled') return;

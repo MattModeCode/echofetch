@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>EchoFetch settings</title>
+  <link rel="stylesheet" href="popup.css">
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <header class="bar">
+    <span class="mark" aria-hidden="true"></span>
+    <h1>EchoFetch settings</h1>
+  </header>
+
+  <main class="form">
+    <div class="field">
+      <label for="maxHeight">Default quality</label>
+      <select id="maxHeight">
+        <option value="360">360p — smallest</option>
+        <option value="480">480p</option>
+        <option value="720">720p — recommended</option>
+        <option value="1080">1080p</option>
+        <option value="9999">Highest available</option>
+      </select>
+      <p class="muted">Pre-selects the largest stream at or below this height. Slides
+        stay readable at 720p, and capping here is what keeps files off 8 GB — nothing
+        afterwards can undo having fetched the 1080p variant.</p>
+    </div>
+
+    <div class="field">
+      <label class="inline">
+        <input type="checkbox" id="audioOnlyDefault">
+        <span>Prefer audio only</span>
+      </label>
+      <p class="muted">When a lecture publishes a separate audio track, select it by
+        default. Roughly 60 MB an hour instead of several GB.</p>
+    </div>
+
+    <div class="field">
+      <label for="filenameTemplate">Filename</label>
+      <input type="text" id="filenameTemplate" spellcheck="false">
+      <p class="muted">Tokens: <code>{title}</code>, <code>{date}</code>. The extension
+        is added automatically.</p>
+    </div>
+
+    <div class="field">
+      <label for="concurrency">Parallel segment downloads</label>
+      <input type="number" id="concurrency" min="1" max="12" step="1">
+      <p class="muted">Lower this if the campus network throttles you or downloads
+        keep failing partway.</p>
+    </div>
+
+    <p class="saved" id="saved" role="status" hidden>Saved</p>
+  </main>
+
+  <script type="module" src="options.js"></script>
+</body>
+</html>

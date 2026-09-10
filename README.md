@@ -18,19 +18,42 @@ There is no store listing. Load it unpacked:
 2. Click the EchoFetch icon.
 3. Pick a stream and click **Download**.
 
-Lectures are usually published as two feeds — a presenter camera and a screen
-capture. Both appear in the list; the higher resolution is normally the screen
-capture. Pick either, or run the download twice to keep both.
+Each row shows the resolution, aspect ratio, and an estimated file size, so you can
+tell what you are committing to before you start. Where a lecture publishes two
+feeds — a presenter camera and a screen capture — EchoFetch labels which is likely
+which from the aspect ratio and resolution. That label is a guess and says so; the
+resolution and size beside it are not.
+
+**Audio only** appears as its own row when the lecture publishes a separate audio
+track, at roughly 60 MB an hour instead of several GB. If no separate track exists,
+the picker says so rather than hiding the option, and the fix is to take the
+smallest video and strip the picture with the ffmpeg command offered afterwards.
 
 The first download from a new lecture host asks for permission to read that host.
 Echo360 serves media from CDN domains that are not known ahead of time, so the
 extension requests them at the moment they are needed rather than claiming broad
 access up front.
 
+## Settings
+
+Right-click the icon and choose Options, or use the Settings link in the popup.
+
+- **Default quality** (default 720p) — pre-selects the largest stream at or below
+  this height. This is the setting that matters. Capping quality at download time is
+  the only thing that reliably keeps lectures off multiple gigabytes; nothing done
+  afterwards can undo having fetched the 1080p variant.
+- **Prefer audio only** — select the audio track by default when one exists.
+- **Filename** — supports `{title}` and `{date}`.
+- **Parallel segment downloads** (default 6) — lower it if the campus network
+  throttles you or transfers keep failing partway.
+
+Settings sync across the Chrome profiles you are signed into.
+
 ## Output
 
 Files land in your normal downloads folder.
 
+- Audio-only saves as `.m4a`, or `.aac` for non-fragmented streams.
 - Streams packaged as fragmented MP4 save as `.mp4` and play anywhere.
 - Streams packaged as MPEG-TS save as `.ts`. VLC and IINA play these directly.
   QuickTime does not. To convert without re-encoding:
@@ -38,6 +61,25 @@ Files land in your normal downloads folder.
   ```
   ffmpeg -i "Lecture.ts" -c copy "Lecture.mp4"
   ```
+
+## Keeping files small
+
+Solve it at download time, not afterwards. The default quality cap and the
+audio-only option between them handle almost every case, and both cost nothing.
+
+EchoFetch deliberately does not transcode in the browser. ffmpeg.wasm carries no
+H.265 encoder in any standard build, and re-encoding a 90-minute lecture in a tab
+would run for hours and exhaust memory long before it finished. Instead, the
+completed-download screen offers a **Copy ffmpeg command** button that puts a
+command tailored to the file you just saved on the clipboard, to run locally:
+
+```
+ffmpeg -i "Lecture.mp4" -c:v libx265 -crf 28 -preset slow -c:a aac -b:a 96k -ac 1 "Lecture-small.mp4"
+```
+
+Lecture video compresses extremely well — static slides, little motion — so this
+typically lands somewhere near a tenth of the original with no visible difference.
+It is not fast; run a batch overnight.
 
 ## Limits
 
