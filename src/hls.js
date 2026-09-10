@@ -157,13 +157,62 @@ export function parseMedia(text, baseUrl) {
  * fMP4 streams carry an EXT-X-MAP init segment; MPEG-TS streams do not.
  * The container decides the extension the assembled file must carry.
  */
-export function containerFor(parsed) {
-  if (parsed.initSegment) return { extension: 'mp4', mime: 'video/mp4' };
-  const first = parsed.segments[0];
-  if (first && /\.mp4|\.m4s/i.test(new URL(first.url).pathname)) {
-    return { extension: 'mp4', mime: 'video/mp4' };
+export function containerFor(parsed, kind = 'video') {
+  const fragmented =
+    Boolean(parsed.initSegment) ||
+    /\.mp4|\.m4s/i.test(parsed.segments[0] ? new URL(parsed.segments[0].url).pathname : '');
+
+  if (kind === 'audio') {
+    return fragmented
+      ? { extension: 'm4a', mime: 'audio/mp4' }
+      : { extension: 'aac', mime: 'audio/aac' };
   }
-  return { extension: 'ts', mime: 'video/mp2t' };
+  return fragmented
+    ? { extension: 'mp4', mime: 'video/mp4' }
+    : { extension: 'ts', mime: 'video/mp2t' };
+}
+
+/** Flatten the master playlist's audio rendition groups, one entry per distinct URL. */
+export function audioRenditions(audioGroups) {
+  const byUrl = new Map();
+  for (const list of audioGroups.values()) {
+    for (const rendition of list) {
+      if (!byUrl.has(rendition.url)) byUrl.set(rendition.url, rendition);
+    }
+  }
+  return [...byUrl.values()];
+}
+
+const ASPECT_NAMES = [
+  [16 / 9, '16:9'],
+  [4 / 3, '4:3'],
+  [3 / 2, '3:2'],
+  [1, '1:1']
+];
+
+export function aspectLabel(resolution) {
+  if (!resolution) return null;
+  const [w, h] = resolution.split('x').map(Number);
+  if (!w || !h) return null;
+  const ratio = w / h;
+  const match = ASPECT_NAMES.find(([value]) => Math.abs(ratio - value) < 0.02);
+  return match ? match[1] : `${ratio.toFixed(2)}:1`;
+}
+
+/** Exactly 16:9 at the higher resolution is usually the screen capture. Usually. */
+export function guessFeed(option, allOptions) {
+  if (allOptions.length < 2) return null;
+  const tallest = Math.max(...allOptions.map((o) => o.height || 0));
+  if (!option.height) return null;
+  if (option.aspect === '16:9' && option.height === tallest) return 'likely screen capture';
+  if (option.aspect && option.aspect !== '16:9') return 'likely presenter camera';
+  return null;
+}
+
+export function formatSize(bytes) {
+  if (!bytes || !isFinite(bytes)) return null;
+  const mb = bytes / 1e6;
+  return mb >= 1000 ? `${(mb / 1000).toFixed(1)} GB` : `${Math.round(mb)} MB`;
 }
 
 export function formatDuration(seconds) {

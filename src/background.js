@@ -5,6 +5,8 @@
 // would kill a lecture-length transfer partway through; the offscreen document is
 // the only place a long-running fetch loop survives.
 
+import { getSettings, applyTemplate } from './settings.js';
+
 const OFFSCREEN_PATH = 'src/offscreen.html';
 const PLAYLIST_PATTERN = /\.m3u8(\?|$)/i;
 
@@ -78,10 +80,11 @@ function sanitizeFilename(name) {
     .slice(0, 120) || 'lecture';
 }
 
-async function startDownload({ variantUrl, title }) {
+async function startDownload({ variantUrl, title, kind = 'video' }) {
   const job = {
     id: `job-${Date.now()}`,
     title,
+    kind,
     done: 0,
     total: 0,
     bytes: 0,
@@ -90,8 +93,9 @@ async function startDownload({ variantUrl, title }) {
   };
   await writeJob(job);
   try {
+    const { concurrency } = await getSettings();
     await ensureOffscreen();
-    await sendToOffscreen({ type: 'download', variantUrl, jobId: job.id });
+    await sendToOffscreen({ type: 'download', variantUrl, jobId: job.id, kind, concurrency });
   } catch (error) {
     await writeJob({ ...job, state: 'error', error: error.message });
     await closeOffscreen();
@@ -100,7 +104,12 @@ async function startDownload({ variantUrl, title }) {
 
 async function deliver({ blobUrl, extension }) {
   const job = await readJob();
-  const filename = `${sanitizeFilename(job?.title)}.${extension}`;
+  const { filenameTemplate } = await getSettings();
+  const stem = applyTemplate(filenameTemplate, {
+    title: job?.title,
+    date: new Date().toISOString().slice(0, 10)
+  });
+  const filename = `${sanitizeFilename(stem)}.${extension}`;
 
   try {
     const downloadId = await chrome.downloads.download({ url: blobUrl, filename, saveAs: false });
