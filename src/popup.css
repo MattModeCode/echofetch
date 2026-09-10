@@ -104,13 +104,37 @@ h1 {
 
 .streams label:hover { border-color: var(--accent); }
 
-.streams input { accent-color: var(--accent); margin: 0; }
+.streams input { accent-color: var(--accent); margin: 0; flex: none; }
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.stack .sub {
+  color: var(--muted);
+  font-size: 12px;
+}
 
 .streams .size {
   margin-left: auto;
+  padding-left: 8px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
+
+.note:empty { display: none; }
+
+.settings-link {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.settings-link:hover { color: var(--text); }
 
 .track {
   height: 5px;

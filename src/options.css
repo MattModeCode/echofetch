@@ -1,0 +1,70 @@
+/* Overrides popup.css, which is sized for the 340px popup. */
+body {
+  width: auto;
+  max-width: 560px;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: 20px 16px 40px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field > label {
+  font-weight: 600;
+}
+
+.field .muted {
+  font-size: 12px;
+}
+
+.inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.inline input {
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+select,
+input[type="text"],
+input[type="number"] {
+  font: inherit;
+  padding: 8px 10px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  max-width: 300px;
+}
+
+select:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+code {
+  padding: 1px 4px;
+  background: var(--surface);
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.saved {
+  margin: 0;
+  color: var(--ok);
+  font-weight: 600;
+}
