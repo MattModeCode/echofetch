@@ -125,8 +125,8 @@ function renderJob(job) {
 
   const root = show('tpl-progress');
   root.querySelector('[data-title]').textContent = job.title;
-  const percent = job.total ? Math.round((job.done / job.total) * 100) : 0;
-  root.querySelector('[data-fill]').style.width = `${percent}%`;
+  const ratio = job.total ? job.done / job.total : 0;
+  root.querySelector('[data-fill]').style.transform = `scaleX(${ratio})`;
   root.querySelector('[data-detail]').textContent = job.total
     ? `${job.done} / ${job.total} segments · ${formatBytes(job.bytes)}`
     : 'Reading the playlist…';
