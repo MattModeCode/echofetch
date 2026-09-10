@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "EchoFetch",
+  "version": "0.1.0",
+  "description": "Download Echo360 lectures for offline viewing using your existing session.",
+  "permissions": [
+    "webRequest",
+    "storage",
+    "downloads",
+    "offscreen",
+    "tabs"
+  ],
+  "host_permissions": [
+    "*://*.echo360.org/*",
+    "*://*.echo360.org.uk/*",
+    "*://*.echo360.ca/*",
+    "*://*.echo360.net.au/*",
+    "*://*.echo360.org.au/*"
+  ],
+  "optional_host_permissions": [
+    "*://*/*"
+  ],
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "src/popup.html",
+    "default_title": "EchoFetch"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

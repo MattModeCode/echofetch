@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>EchoFetch</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="bar">
+    <span class="mark" aria-hidden="true"></span>
+    <h1>EchoFetch</h1>
+  </header>
+
+  <main id="view" aria-live="polite">
+    <section class="state" data-state="loading">
+      <p class="muted">Checking this tab…</p>
+    </section>
+  </main>
+
+  <template id="tpl-offsite">
+    <section class="state">
+      <p class="lead">Not an Echo360 page.</p>
+      <p class="muted">Open a lecture, then reopen EchoFetch.</p>
+    </section>
+  </template>
+
+  <template id="tpl-waiting">
+    <section class="state">
+      <p class="lead">No stream detected yet.</p>
+      <p class="muted">Press play on the lecture for a second — EchoFetch reads the
+        playlist as the player requests it — then reopen this popup.</p>
+      <p class="muted">Still nothing? Your institution may serve video from its own
+        domain, which EchoFetch cannot watch without permission.</p>
+      <button class="ghost" data-widen>Allow EchoFetch to watch all sites</button>
+    </section>
+  </template>
+
+  <template id="tpl-picker">
+    <section class="state">
+      <p class="title" data-title></p>
+      <p class="muted" data-meta></p>
+      <ul class="streams" data-streams role="list"></ul>
+      <button class="primary" data-start>Download</button>
+    </section>
+  </template>
+
+  <template id="tpl-progress">
+    <section class="state">
+      <p class="title" data-title></p>
+      <div class="track"><div class="fill" data-fill></div></div>
+      <p class="muted" data-detail></p>
+      <button class="ghost" data-cancel>Cancel</button>
+    </section>
+  </template>
+
+  <template id="tpl-done">
+    <section class="state">
+      <p class="lead ok">Saved.</p>
+      <p class="muted" data-filename></p>
+      <button class="ghost" data-again>Download another</button>
+    </section>
+  </template>
+
+  <template id="tpl-error">
+    <section class="state">
+      <p class="lead bad">Couldn't finish.</p>
+      <p class="muted" data-message></p>
+      <button class="ghost" data-again>Try again</button>
+    </section>
+  </template>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
