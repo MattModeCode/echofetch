@@ -47,8 +47,10 @@ only ever recur loudly.
    from the original note: if it is a CDN host, capture returns empty until the user
    grants all-sites access from the popup.
 2. **Whether presenter and screen feeds are separate masters or variants in one.**
-3. **Audio.** Every file downloaded so far is video-only, with no audio track at all,
-   which means the audio is a separate `EXT-X-MEDIA` rendition and a video download
-   never includes it. EchoFetch offers audio as its own row but never muxes the two,
-   so a downloaded lecture is silent. Not yet fixed. Echo360's own Transcript tab
-   (`.vtt` / `.txt`) is the practical workaround for anything text-based.
+3. **Which audio rendition belongs to which video variant.** Every file downloaded
+   before 0.3.0 is video-only with no audio track at all, confirming that audio is a
+   separate `EXT-X-MEDIA` rendition. 0.3.0 pairs a variant with the default rendition
+   of its `AUDIO` group, falling back to the sole rendition when a variant names no
+   group, and refusing to guess when several exist. Whether McMaster's masters
+   actually set the `AUDIO` attribute is still unverified — if they do not, the
+   single-rendition fallback is what will fire.

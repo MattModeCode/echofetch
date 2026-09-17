@@ -8,7 +8,13 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 
-import { parseMedia, parseMaster, rangeHeader, containerFor } from '../src/hls.js';
+import {
+  parseMedia,
+  parseMaster,
+  rangeHeader,
+  containerFor,
+  audioForVariant
+} from '../src/hls.js';
 
 const BASE = 'https://cdn.example.edu/lecture/index.m3u8';
 
@@ -155,4 +161,56 @@ video/720/index.m3u8
   assert.equal(variants[0].height, 720); // sorted by bandwidth, highest first
   assert.equal(variants[0].audioGroup, 'aac');
   assert.equal(audioGroups.get('aac').length, 1);
+});
+
+// Every lecture downloaded before 0.2.0 was silent: audio is its own EXT-X-MEDIA
+// rendition, and a video variant fetched alone carries no audio track at all.
+
+test('a variant is paired with the default rendition of its named audio group', () => {
+  const master = `#EXTM3U
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aac",NAME="Commentary",DEFAULT=NO,URI="audio/alt.m3u8"
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aac",NAME="English",DEFAULT=YES,URI="audio/main.m3u8"
+#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360,AUDIO="aac"
+video/360/index.m3u8
+`;
+  const { variants, audioGroups } = parseMaster(master, BASE);
+  const companion = audioForVariant(variants[0], audioGroups);
+
+  assert.equal(companion.name, 'English');
+  assert.equal(companion.url, 'https://cdn.example.edu/lecture/audio/main.m3u8');
+});
+
+test('a variant naming no group still pairs when there is exactly one rendition', () => {
+  const master = `#EXTM3U
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="a1",NAME="English",DEFAULT=YES,URI="audio/main.m3u8"
+#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360
+video/360/index.m3u8
+`;
+  const { variants, audioGroups } = parseMaster(master, BASE);
+
+  assert.equal(variants[0].audioGroup, null);
+  assert.equal(
+    audioForVariant(variants[0], audioGroups).url,
+    'https://cdn.example.edu/lecture/audio/main.m3u8'
+  );
+});
+
+test('pairing is refused when it would be a guess between renditions', () => {
+  const ambiguous = `#EXTM3U
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="a1",NAME="English",DEFAULT=YES,URI="audio/en.m3u8"
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="a2",NAME="French",DEFAULT=YES,URI="audio/fr.m3u8"
+#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360
+video/360/index.m3u8
+`;
+  const { variants, audioGroups } = parseMaster(ambiguous, BASE);
+  assert.equal(audioForVariant(variants[0], audioGroups), null);
+});
+
+test('a master with no audio rendition pairs with nothing', () => {
+  const silent = `#EXTM3U
+#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360
+video/360/index.m3u8
+`;
+  const { variants, audioGroups } = parseMaster(silent, BASE);
+  assert.equal(audioForVariant(variants[0], audioGroups), null);
 });

@@ -32,7 +32,38 @@ smallest video and strip the picture with the ffmpeg command offered afterwards.
 The first download from a new lecture host asks for permission to read that host.
 Echo360 serves media from CDN domains that are not known ahead of time, so the
 extension requests them at the moment they are needed rather than claiming broad
-access up front.
+access up front. A paired download asks for the audio host too, up front, so the
+second stream cannot fail halfway through.
+
+## Audio
+
+Echo360 publishes audio as its own rendition, so a video stream fetched on its own is
+**completely silent** — not quiet, but carrying no audio track at all. Every lecture
+downloaded with 0.2.0 and earlier has this problem.
+
+From 0.3.0 a video download also fetches the companion audio track and saves it
+beside the video, sharing one name:
+
+```
+SOCPSY 1Z03 What Is Social Psych.mp4    video
+SOCPSY 1Z03 What Is Social Psych.m4a    audio
+```
+
+Each row in the picker says whether sound is coming with it. The finished screen
+offers a **Copy merge command**, and the two files can also be combined in bulk:
+
+```
+node tools/merge-audio.mjs ~/Downloads                      # report only
+node tools/merge-audio.mjs --apply ~/Downloads              # write the merged files
+node tools/merge-audio.mjs --apply --replace ~/Downloads    # and delete the pair
+```
+
+It matches files by name, stream-copies with no re-encode, verifies the result
+actually has an audio stream before touching anything, and tells you which lectures
+are still silent because their audio was never downloaded. For those, take the
+**Audio only** row for that lecture and run it again.
+
+Turn the pairing off under Options if you only ever want the picture.
 
 ## Settings
 
@@ -42,6 +73,8 @@ Right-click the icon and choose Options, or use the Settings link in the popup.
   this height. This is the setting that matters. Capping quality at download time is
   the only thing that reliably keeps lectures off multiple gigabytes; nothing done
   afterwards can undo having fetched the 1080p variant.
+- **Download audio with video** (default on) — fetch the companion audio track and
+  save it beside the video. Without it a downloaded lecture is silent.
 - **Prefer audio only** — select the audio track by default when one exists.
 - **Filename** — supports `{title}` and `{date}`.
 - **Parallel segment downloads** (default 6) — lower it if the campus network
@@ -104,15 +137,11 @@ It is not fast; run a batch overnight.
 
 ## Limits
 
-- **A downloaded video has no sound.** Echo360 publishes audio as a separate
-  rendition, and EchoFetch saves whichever single stream you picked without muxing
-  the two. Take the **Audio only** row alongside the video and combine them
-  yourself, or use Echo360's own Transcript tab if you only need the words:
-
-  ```
-  ffmpeg -i "Lecture.mp4" -i "Lecture.m4a" -c copy "Lecture-with-audio.mp4"
-  ```
-
+- **A lecture arrives as two files until you merge them.** Echo360 publishes audio
+  as a separate rendition, and muxing two fragmented-MP4 streams inside a browser tab
+  needs a full container muxer. EchoFetch fetches both and saves them side by side;
+  `tools/merge-audio.mjs` or the offered ffmpeg command combines them in about a
+  second. See **Audio** above.
 - **DRM-protected lectures cannot be downloaded.** If your institution enabled
   Widevine or PlayReady, EchoFetch detects it and says so instead of writing a
   broken file. No extension can decrypt those streams.

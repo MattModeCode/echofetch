@@ -222,6 +222,19 @@ export function containerFor(parsed, kind = 'video') {
     : { extension: 'ts', mime: 'video/mp2t' };
 }
 
+/**
+ * The audio rendition that belongs with a video variant. Normally the variant names
+ * its AUDIO group. Where it names none but the master publishes exactly one audio
+ * rendition, that is the companion by elimination.
+ */
+export function audioForVariant(variant, audioGroups) {
+  const named = variant.audioGroup ? audioGroups.get(variant.audioGroup) : null;
+  if (named?.length) return named.find((r) => r.isDefault) || named[0];
+
+  const all = audioRenditions(audioGroups);
+  return all.length === 1 ? all[0] : null;
+}
+
 /** Flatten the master playlist's audio rendition groups, one entry per distinct URL. */
 export function audioRenditions(audioGroups) {
   const byUrl = new Map();

@@ -130,11 +130,9 @@ async function runPool(segments, refreshSegments, onProgress, concurrency) {
   return results;
 }
 
-async function download(variantUrl, jobId, kind, concurrency) {
-  cancelled = false;
-  keyCache.clear();
-
-  const { parsed, mediaUrl } = await loadMediaPlaylist(variantUrl);
+/** Read a playlist and refuse the shapes that cannot produce a usable file. */
+async function prepareStream(url) {
+  const { parsed, mediaUrl } = await loadMediaPlaylist(url);
 
   if (parsed.drm) {
     throw new Error(
@@ -156,16 +154,10 @@ async function download(variantUrl, jobId, kind, concurrency) {
     );
   }
 
-  const total = parsed.segments.length;
-  let lastPost = 0;
-  const post = (done, bytes) => {
-    const now = Date.now();
-    if (now - lastPost < PROGRESS_INTERVAL_MS && done < total) return;
-    lastPost = now;
-    chrome.runtime.sendMessage({ type: 'progress', jobId, patch: { done, total, bytes } });
-  };
-  post(0, 0);
+  return { parsed, mediaUrl };
+}
 
+async function assembleStream({ parsed, mediaUrl }, kind, concurrency, onProgress) {
   const refreshSegments = async () => {
     const refreshed = await loadMediaPlaylist(mediaUrl);
     return refreshed.parsed.segments.map((s) => ({ url: s.url, byteRange: s.byteRange }));
@@ -179,11 +171,57 @@ async function download(variantUrl, jobId, kind, concurrency) {
       })
     );
   }
-  parts.push(...(await runPool(parsed.segments, refreshSegments, post, concurrency)));
+  parts.push(...(await runPool(parsed.segments, refreshSegments, onProgress, concurrency)));
 
   const { extension, mime } = containerFor(parsed, kind);
-  const blobUrl = URL.createObjectURL(new Blob(parts, { type: mime }));
-  chrome.runtime.sendMessage({ type: 'assembled', jobId, blobUrl, extension });
+  return { blobUrl: URL.createObjectURL(new Blob(parts, { type: mime })), extension };
+}
+
+/**
+ * Echo360 publishes audio as its own rendition, so a video stream on its own is
+ * silent. When the picker passes an audio URL alongside the video one, both are
+ * fetched in the same job and delivered as a matched pair.
+ */
+async function download({ variantUrl, audioUrl, jobId, kind, concurrency }) {
+  cancelled = false;
+  keyCache.clear();
+
+  const video = await prepareStream(variantUrl);
+  const audio = audioUrl ? await prepareStream(audioUrl) : null;
+
+  const total = video.parsed.segments.length + (audio ? audio.parsed.segments.length : 0);
+  let lastPost = 0;
+  let baseDone = 0;
+  let baseBytes = 0;
+  let streamBytes = 0;
+
+  const post = (done, bytes) => {
+    streamBytes = bytes;
+    const cumulativeDone = baseDone + done;
+    const now = Date.now();
+    if (now - lastPost < PROGRESS_INTERVAL_MS && cumulativeDone < total) return;
+    lastPost = now;
+    chrome.runtime.sendMessage({
+      type: 'progress',
+      jobId,
+      patch: { done: cumulativeDone, total, bytes: baseBytes + bytes }
+    });
+  };
+  post(0, 0);
+
+  const files = [];
+  const primary = await assembleStream(video, kind, concurrency, post);
+  files.push({ ...primary, role: kind });
+
+  if (audio) {
+    // The second stream restarts its own counters, so carry the first one's totals.
+    baseDone = video.parsed.segments.length;
+    baseBytes = streamBytes;
+    const companion = await assembleStream(audio, 'audio', concurrency, post);
+    files.push({ ...companion, role: 'audio' });
+  }
+
+  chrome.runtime.sendMessage({ type: 'assembled', jobId, files });
 }
 
 chrome.runtime.onMessage.addListener((message) => {
@@ -194,8 +232,13 @@ chrome.runtime.onMessage.addListener((message) => {
     return false;
   }
   if (message.type === 'download') {
-    const concurrency = message.concurrency || DEFAULT_CONCURRENCY;
-    download(message.variantUrl, message.jobId, message.kind || 'video', concurrency).catch((error) => {
+    download({
+      variantUrl: message.variantUrl,
+      audioUrl: message.audioUrl || null,
+      jobId: message.jobId,
+      kind: message.kind || 'video',
+      concurrency: message.concurrency || DEFAULT_CONCURRENCY
+    }).catch((error) => {
       // Stop any sibling workers still in flight before reporting.
       cancelled = true;
       if (error.message === 'cancelled') return;
