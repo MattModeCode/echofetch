@@ -1,7 +1,13 @@
 // The download engine. Lives in an offscreen document so a lecture-length transfer
 // is not killed by the service worker's ~30s idle teardown.
 
-import { isMasterPlaylist, parseMaster, parseMedia, containerFor } from './hls.js';
+import {
+  isMasterPlaylist,
+  parseMaster,
+  parseMedia,
+  containerFor,
+  rangeHeader
+} from './hls.js';
 
 const DEFAULT_CONCURRENCY = 6;
 const MAX_ATTEMPTS = 3;
@@ -25,14 +31,31 @@ function sequenceIv(sequence) {
   return iv;
 }
 
-async function fetchWithSession(url, asText = false) {
-  const response = await fetch(url, { credentials: 'include', cache: 'no-store' });
+async function fetchWithSession(url, { asText = false, byteRange = null } = {}) {
+  const init = { credentials: 'include', cache: 'no-store' };
+  if (byteRange) init.headers = { Range: rangeHeader(byteRange) };
+
+  const response = await fetch(url, init);
   if (!response.ok) {
     const error = new Error(`HTTP ${response.status} for ${new URL(url).pathname}`);
     error.status = response.status;
     throw error;
   }
-  return asText ? response.text() : response.arrayBuffer();
+  if (asText) return response.text();
+
+  const buffer = await response.arrayBuffer();
+  if (!byteRange || response.status === 206) return buffer;
+
+  // 200 means the server ignored the Range header and sent the whole file. Slicing
+  // here is what keeps that from becoming one whole lecture per segment on disk.
+  const end = byteRange.offset + byteRange.length;
+  if (buffer.byteLength < end) {
+    throw new Error(
+      `Server ignored the byte range and returned ${buffer.byteLength} bytes, ` +
+        `too short for bytes ${byteRange.offset}-${end - 1}.`
+    );
+  }
+  return buffer.slice(byteRange.offset, end);
 }
 
 const keyCache = new Map();
@@ -47,33 +70,36 @@ async function decryptSegment(buffer, key, sequence) {
 }
 
 async function loadMediaPlaylist(url) {
-  const text = await fetchWithSession(url, true);
+  const text = await fetchWithSession(url, { asText: true });
   if (!isMasterPlaylist(text)) return { parsed: parseMedia(text, url), mediaUrl: url };
 
   const { variants } = parseMaster(text, url);
   if (!variants.length) throw new Error('Master playlist listed no video streams.');
   const best = variants[0];
-  const mediaText = await fetchWithSession(best.url, true);
+  const mediaText = await fetchWithSession(best.url, { asText: true });
   return { parsed: parseMedia(mediaText, best.url), mediaUrl: best.url };
 }
 
 /**
  * Segment URLs can carry expiring tokens. On an auth failure we re-read the
- * playlist once and swap in the fresh URL for the same index rather than failing
- * a download that is otherwise healthy.
+ * playlist once and swap in the fresh URL and byte range for the same index rather
+ * than failing a download that is otherwise healthy.
  */
-async function fetchSegment(segment, index, refreshUrls) {
+async function fetchSegment(segment, index, refreshSegments) {
   let lastError;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     if (cancelled) throw new Error('cancelled');
     try {
-      const buffer = await fetchWithSession(segment.url);
+      const buffer = await fetchWithSession(segment.url, { byteRange: segment.byteRange });
       return segment.key ? await decryptSegment(buffer, segment.key, segment.sequence) : buffer;
     } catch (error) {
       lastError = error;
       if (error.status === 401 || error.status === 403) {
-        const fresh = await refreshUrls();
-        if (fresh[index]) segment.url = fresh[index];
+        const fresh = await refreshSegments();
+        if (fresh[index]) {
+          segment.url = fresh[index].url;
+          segment.byteRange = fresh[index].byteRange;
+        }
       }
       if (attempt < MAX_ATTEMPTS) await sleep(400 * attempt);
     }
@@ -81,7 +107,7 @@ async function fetchSegment(segment, index, refreshUrls) {
   throw new Error(`Segment ${index + 1} failed after ${MAX_ATTEMPTS} attempts: ${lastError.message}`);
 }
 
-async function runPool(segments, refreshUrls, onProgress, concurrency) {
+async function runPool(segments, refreshSegments, onProgress, concurrency) {
   const results = new Array(segments.length);
   let nextIndex = 0;
   let done = 0;
@@ -91,7 +117,7 @@ async function runPool(segments, refreshUrls, onProgress, concurrency) {
     while (nextIndex < segments.length) {
       if (cancelled) return;
       const index = nextIndex++;
-      const buffer = await fetchSegment(segments[index], index, refreshUrls);
+      const buffer = await fetchSegment(segments[index], index, refreshSegments);
       results[index] = buffer;
       done++;
       bytes += buffer.byteLength;
@@ -118,6 +144,18 @@ async function download(variantUrl, jobId, kind, concurrency) {
   }
   if (!parsed.segments.length) throw new Error('Playlist contained no media segments.');
 
+  // A byte-range playlist points every segment at one file and distinguishes them by
+  // EXT-X-BYTERANGE. Downloading it without honouring those ranges fetches the whole
+  // lecture once per segment — the 3.9 GB failure this guard exists to make loud.
+  const distinctUrls = new Set(parsed.segments.map((s) => s.url)).size;
+  if (parsed.segments.length > 1 && distinctUrls === 1 && !parsed.byteRanged) {
+    throw new Error(
+      `This playlist lists ${parsed.segments.length} segments that all share one URL but ` +
+        'publishes no byte ranges. Downloading it would fetch the whole lecture once per ' +
+        'segment, so EchoFetch stopped instead.'
+    );
+  }
+
   const total = parsed.segments.length;
   let lastPost = 0;
   const post = (done, bytes) => {
@@ -128,14 +166,20 @@ async function download(variantUrl, jobId, kind, concurrency) {
   };
   post(0, 0);
 
-  const refreshUrls = async () => {
+  const refreshSegments = async () => {
     const refreshed = await loadMediaPlaylist(mediaUrl);
-    return refreshed.parsed.segments.map((s) => s.url);
+    return refreshed.parsed.segments.map((s) => ({ url: s.url, byteRange: s.byteRange }));
   };
 
   const parts = [];
-  if (parsed.initSegment) parts.push(await fetchWithSession(parsed.initSegment.url));
-  parts.push(...(await runPool(parsed.segments, refreshUrls, post, concurrency)));
+  if (parsed.initSegment) {
+    parts.push(
+      await fetchWithSession(parsed.initSegment.url, {
+        byteRange: parsed.initSegment.byteRange
+      })
+    );
+  }
+  parts.push(...(await runPool(parsed.segments, refreshSegments, post, concurrency)));
 
   const { extension, mime } = containerFor(parsed, kind);
   const blobUrl = URL.createObjectURL(new Blob(parts, { type: mime }));
