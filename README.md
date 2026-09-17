@@ -67,6 +67,27 @@ Files land in your normal downloads folder.
 Solve it at download time, not afterwards. The default quality cap and the
 audio-only option between them handle almost every case, and both cost nothing.
 
+### If you used 0.1.0, your files are far bigger than they should be
+
+Echo360 publishes one MP4 per stream and points every segment in the playlist at it
+with `#EXT-X-BYTERANGE`. Version 0.1.0 did not parse that tag, so every segment
+resolved to the same whole-file URL and the downloader fetched the entire lecture
+once per segment. A 59-minute lecture whose real stream is 10.7 MB was written as
+**3.87 GB — 361 identical copies end to end**.
+
+0.2.0 honours the ranges, and refuses to start a download that would repeat the old
+mistake. To repair files already on disk:
+
+```
+node tools/repair-duplicated-mp4.mjs ~/Downloads            # report only
+node tools/repair-duplicated-mp4.mjs --apply ~/Downloads    # truncate to one copy
+```
+
+It takes files or directories, verifies the copies are byte-identical before
+touching anything, and leaves anything it does not recognize alone. The first copy
+is a complete, valid MP4, so nothing is lost — duration and last frame are
+unchanged.
+
 EchoFetch deliberately does not transcode in the browser. ffmpeg.wasm carries no
 H.265 encoder in any standard build, and re-encoding a 90-minute lecture in a tab
 would run for hours and exhaust memory long before it finished. Instead, the
@@ -82,6 +103,15 @@ typically lands somewhere near a tenth of the original with no visible differenc
 It is not fast; run a batch overnight.
 
 ## Limits
+
+- **A downloaded video has no sound.** Echo360 publishes audio as a separate
+  rendition, and EchoFetch saves whichever single stream you picked without muxing
+  the two. Take the **Audio only** row alongside the video and combine them
+  yourself, or use Echo360's own Transcript tab if you only need the words:
+
+  ```
+  ffmpeg -i "Lecture.mp4" -i "Lecture.m4a" -c copy "Lecture-with-audio.mp4"
+  ```
 
 - **DRM-protected lectures cannot be downloaded.** If your institution enabled
   Widevine or PlayReady, EchoFetch detects it and says so instead of writing a
@@ -105,9 +135,22 @@ would kill a lecture-length transfer partway through and leave a truncated file.
 The offscreen document has no such timer.
 
 Segments are fetched six at a time, each retried up to three times. If a segment
-URL's token expires mid-download, the playlist is re-read and the fresh URL is
-swapped in rather than failing the whole run. Segments are concatenated in order
-and handed to `chrome.downloads` as a single blob.
+URL's token expires mid-download, the playlist is re-read and the fresh URL and byte
+range are swapped in rather than failing the whole run. Segments are concatenated in
+order and handed to `chrome.downloads` as a single blob.
+
+Where the playlist uses `#EXT-X-BYTERANGE` — as Echo360's does — every segment shares
+one URL and is fetched with a `Range` header instead. If a server ignores the header
+and returns the whole file with `200`, the window is sliced out client-side, so a
+non-compliant CDN cannot quietly turn one lecture into hundreds of copies of itself.
+
+## Development
+
+No build step and no dependencies. The parser has tests:
+
+```
+npm test
+```
 
 ## Scope
 

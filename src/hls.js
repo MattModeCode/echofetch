@@ -26,6 +26,25 @@ export function isMasterPlaylist(text) {
 }
 
 /**
+ * Resolve an EXT-X-BYTERANGE value ("<length>[@<offset>]") against the running
+ * cursor for that URL. RFC 8216 lets the offset be omitted, in which case the
+ * sub-range starts at the byte after the previous sub-range of the same URL.
+ */
+function resolveByteRange(spec, url, cursor) {
+  const [lengthPart, offsetPart] = String(spec).trim().split('@');
+  const length = parseInt(lengthPart, 10);
+  if (!Number.isFinite(length) || length <= 0) return null;
+  const offset = offsetPart === undefined ? cursor.get(url) : parseInt(offsetPart, 10);
+  if (!Number.isFinite(offset) || offset < 0) return null;
+  return { offset, length };
+}
+
+/** The Range header for a resolved byte range. Ranges are inclusive at both ends. */
+export function rangeHeader({ offset, length }) {
+  return `bytes=${offset}-${offset + length - 1}`;
+}
+
+/**
  * Parse a master playlist into its variant streams, highest bandwidth first.
  */
 export function parseMaster(text, baseUrl) {
@@ -91,6 +110,9 @@ export function parseMedia(text, baseUrl) {
   let mediaSequence = 0;
   let totalDuration = 0;
   let pendingDuration = 0;
+  let pendingRange = null;
+  // url -> byte after the previous sub-range, for EXT-X-BYTERANGE without an offset.
+  const rangeCursor = new Map();
 
   for (const raw of lines) {
     const line = raw.trim();
@@ -103,7 +125,19 @@ export function parseMedia(text, baseUrl) {
 
     if (line.startsWith('#EXT-X-MAP:')) {
       const attrs = parseAttributes(line.slice('#EXT-X-MAP:'.length));
-      if (attrs.URI) initSegment = { url: resolveUrl(baseUrl, attrs.URI) };
+      if (attrs.URI) {
+        const url = resolveUrl(baseUrl, attrs.URI);
+        const byteRange = attrs.BYTERANGE
+          ? resolveByteRange(attrs.BYTERANGE, url, rangeCursor)
+          : null;
+        if (byteRange) rangeCursor.set(url, byteRange.offset + byteRange.length);
+        initSegment = { url, byteRange };
+      }
+      continue;
+    }
+
+    if (line.startsWith('#EXT-X-BYTERANGE:')) {
+      pendingRange = line.slice('#EXT-X-BYTERANGE:'.length);
       continue;
     }
 
@@ -140,8 +174,14 @@ export function parseMedia(text, baseUrl) {
 
     if (line.startsWith('#')) continue;
 
+    const url = resolveUrl(baseUrl, line);
+    const byteRange = pendingRange ? resolveByteRange(pendingRange, url, rangeCursor) : null;
+    pendingRange = null;
+    if (byteRange) rangeCursor.set(url, byteRange.offset + byteRange.length);
+
     segments.push({
-      url: resolveUrl(baseUrl, line),
+      url,
+      byteRange,
       duration: pendingDuration,
       sequence: mediaSequence + segments.length,
       key: currentKey
@@ -150,7 +190,17 @@ export function parseMedia(text, baseUrl) {
     pendingDuration = 0;
   }
 
-  return { segments, initSegment, drm, totalDuration };
+  // Byte-range playlists point every segment at one file. Knowing that up front lets
+  // the downloader ask for windows instead of fetching the whole lecture per segment,
+  // and gives an exact byte total instead of a bandwidth guess.
+  const ranged = segments.filter((s) => s.byteRange);
+  const byteRanged = ranged.length > 0;
+  const expectedBytes = byteRanged && ranged.length === segments.length
+    ? ranged.reduce((sum, s) => sum + s.byteRange.length, 0) +
+      (initSegment?.byteRange ? initSegment.byteRange.length : 0)
+    : 0;
+
+  return { segments, initSegment, drm, totalDuration, byteRanged, expectedBytes };
 }
 
 /**
