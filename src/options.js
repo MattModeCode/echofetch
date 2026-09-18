@@ -2,6 +2,7 @@ import { getSettings, saveSettings, DEFAULTS } from './settings.js';
 
 const fields = {
   maxHeight: { el: document.getElementById('maxHeight'), read: (el) => Number(el.value) },
+  includeAudio: { el: document.getElementById('includeAudio'), read: (el) => el.checked },
   audioOnlyDefault: { el: document.getElementById('audioOnlyDefault'), read: (el) => el.checked },
   filenameTemplate: {
     el: document.getElementById('filenameTemplate'),
@@ -28,6 +29,7 @@ async function init() {
   const settings = await getSettings();
 
   fields.maxHeight.el.value = String(settings.maxHeight);
+  fields.includeAudio.el.checked = settings.includeAudio;
   fields.audioOnlyDefault.el.checked = settings.audioOnlyDefault;
   fields.filenameTemplate.el.value = settings.filenameTemplate;
   fields.concurrency.el.value = String(settings.concurrency);

@@ -80,11 +80,12 @@ function sanitizeFilename(name) {
     .slice(0, 120) || 'lecture';
 }
 
-async function startDownload({ variantUrl, title, kind = 'video' }) {
+async function startDownload({ variantUrl, audioUrl = null, title, kind = 'video' }) {
   const job = {
     id: `job-${Date.now()}`,
     title,
     kind,
+    withAudio: Boolean(audioUrl),
     done: 0,
     total: 0,
     bytes: 0,
@@ -95,39 +96,63 @@ async function startDownload({ variantUrl, title, kind = 'video' }) {
   try {
     const { concurrency } = await getSettings();
     await ensureOffscreen();
-    await sendToOffscreen({ type: 'download', variantUrl, jobId: job.id, kind, concurrency });
+    await sendToOffscreen({
+      type: 'download',
+      variantUrl,
+      audioUrl,
+      jobId: job.id,
+      kind,
+      concurrency
+    });
   } catch (error) {
     await writeJob({ ...job, state: 'error', error: error.message });
     await closeOffscreen();
   }
 }
 
-async function deliver({ blobUrl, extension }) {
+function saveFile(url, filename) {
+  return chrome.downloads.download({ url, filename, saveAs: false }).then(
+    (downloadId) =>
+      new Promise((resolve, reject) => {
+        const onChanged = (delta) => {
+          if (delta.id !== downloadId) return;
+          if (delta.state?.current === 'complete') {
+            chrome.downloads.onChanged.removeListener(onChanged);
+            resolve(filename);
+          }
+          if (delta.state?.current === 'interrupted') {
+            chrome.downloads.onChanged.removeListener(onChanged);
+            reject(new Error(delta.error?.current || 'Download interrupted by the browser.'));
+          }
+        };
+        chrome.downloads.onChanged.addListener(onChanged);
+      })
+  );
+}
+
+/**
+ * A video and its companion audio arrive as two files. They share one stem and differ
+ * only by extension, so `tools/merge-audio.mjs` and the offered ffmpeg command can
+ * pair them without guessing.
+ */
+async function deliver({ files }) {
   const job = await readJob();
   const { filenameTemplate } = await getSettings();
-  const stem = applyTemplate(filenameTemplate, {
-    title: job?.title,
-    date: new Date().toISOString().slice(0, 10)
-  });
-  const filename = `${sanitizeFilename(stem)}.${extension}`;
+  const stem = sanitizeFilename(
+    applyTemplate(filenameTemplate, {
+      title: job?.title,
+      date: new Date().toISOString().slice(0, 10)
+    })
+  );
 
   try {
-    const downloadId = await chrome.downloads.download({ url: blobUrl, filename, saveAs: false });
-    await new Promise((resolve, reject) => {
-      const onChanged = (delta) => {
-        if (delta.id !== downloadId) return;
-        if (delta.state?.current === 'complete') {
-          chrome.downloads.onChanged.removeListener(onChanged);
-          resolve();
-        }
-        if (delta.state?.current === 'interrupted') {
-          chrome.downloads.onChanged.removeListener(onChanged);
-          reject(new Error(delta.error?.current || 'Download interrupted by the browser.'));
-        }
-      };
-      chrome.downloads.onChanged.addListener(onChanged);
-    });
-    await writeJob({ ...job, state: 'complete', filename });
+    const filenames = [];
+    for (const file of files) {
+      // Sequential: two concurrent downloads land in an unpredictable order, and the
+      // second can inherit a " (1)" suffix that breaks the shared stem.
+      filenames.push(await saveFile(file.blobUrl, `${stem}.${file.extension}`));
+    }
+    await writeJob({ ...job, state: 'complete', filename: filenames[0], filenames });
   } catch (error) {
     await writeJob({ ...job, state: 'error', error: error.message });
   } finally {

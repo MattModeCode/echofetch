@@ -3,6 +3,7 @@ import {
   parseMaster,
   parseMedia,
   audioRenditions,
+  audioForVariant,
   aspectLabel,
   guessFeed,
   formatSize,
@@ -70,14 +71,17 @@ async function buildOptions(playlists) {
 
     for (const variant of variants) {
       const aspect = aspectLabel(variant.resolution);
+      const companion = audioForVariant(variant, audioGroups);
+      const videoBytes = duration && variant.bandwidth ? (variant.bandwidth / 8) * duration : 0;
       video.push({
         kind: 'video',
         url: variant.url,
+        audioUrl: companion ? companion.url : null,
         source,
         height: variant.height || 0,
         aspect,
         label: variant.height ? `${variant.height}p${aspect ? ` · ${aspect}` : ''}` : source,
-        bytes: duration && variant.bandwidth ? (variant.bandwidth / 8) * duration : 0
+        bytes: videoBytes + (companion && duration ? (ASSUMED_AUDIO_BITRATE / 8) * duration : 0)
       });
     }
 
@@ -96,7 +100,8 @@ async function buildOptions(playlists) {
 
   for (const option of video) {
     const feed = guessFeed(option, video);
-    option.sub = [option.source, feed].filter(Boolean).join(' — ');
+    const sound = option.audioUrl ? 'with audio' : 'no audio track published';
+    option.sub = [option.source, feed, sound].filter(Boolean).join(' — ');
   }
 
   return { video, audio, duration };
@@ -164,19 +169,32 @@ function renderPicker(title, groups, settings) {
 
   root.querySelector('[data-start]').addEventListener('click', async (event) => {
     const chosen = options[Number(view.querySelector('input[name=stream]:checked').value)];
+    const audioUrl = settings.includeAudio ? chosen.audioUrl || null : null;
     const host = new URL(chosen.url).host;
+
+    // The audio rendition can sit on a different origin, and both must be granted
+    // before the job starts or the second stream fails halfway through.
+    const origins = [
+      ...new Set(
+        [chosen.url, audioUrl].filter(Boolean).map((url) => `${new URL(url).origin}/*`)
+      )
+    ];
 
     // request() must be the first await here or Chrome stops counting the click as a
     // user gesture. It resolves true without prompting when already granted.
-    const granted = await chrome.permissions.request({
-      origins: [`${new URL(chosen.url).origin}/*`]
-    });
+    const granted = await chrome.permissions.request({ origins });
     if (!granted) {
       return renderError(`EchoFetch needs permission to read ${host} to fetch the media.`);
     }
 
     event.target.disabled = true;
-    await send({ type: 'startDownload', variantUrl: chosen.url, title, kind: chosen.kind });
+    await send({
+      type: 'startDownload',
+      variantUrl: chosen.url,
+      audioUrl,
+      title,
+      kind: chosen.kind
+    });
     renderJob({ title, done: 0, total: 0, bytes: 0, state: 'starting' });
   });
 }
@@ -185,17 +203,32 @@ function shrinkCommand(filename) {
   return `ffmpeg -i "${filename}" -c:v libx265 -crf 28 -preset slow -c:a aac -b:a 96k -ac 1 "${filename.replace(/\.[^.]+$/, '')}-small.mp4"`;
 }
 
+/** Stream copy, no re-encode: the two files are already in the right codecs. */
+function mergeCommand([video, audio]) {
+  return `ffmpeg -i "${video}" -i "${audio}" -c copy "${video.replace(/\.[^.]+$/, '')}-with-audio.mp4"`;
+}
+
 function renderDone(job) {
   const root = show('tpl-done');
-  root.querySelector('[data-filename]').textContent = job.filename || '';
+  const filenames = job.filenames?.length ? job.filenames : [job.filename].filter(Boolean);
+  root.querySelector('[data-filename]').textContent = filenames.join('  +  ');
 
   const copy = root.querySelector('[data-copy]');
-  // Audio files are already small; a transcode command would be noise.
-  if (job.kind === 'audio' || !job.filename) {
+  const paired = filenames.length > 1;
+
+  // A paired download is two files until they are merged, so that command comes
+  // first. Audio on its own is already small, and a transcode command would be noise.
+  if (paired) {
+    copy.textContent = 'Copy merge command';
+    copy.addEventListener('click', async () => {
+      await navigator.clipboard.writeText(mergeCommand(filenames));
+      copy.textContent = 'Copied';
+    });
+  } else if (job.kind === 'audio' || !filenames.length) {
     copy.remove();
   } else {
     copy.addEventListener('click', async () => {
-      await navigator.clipboard.writeText(shrinkCommand(job.filename));
+      await navigator.clipboard.writeText(shrinkCommand(filenames[0]));
       copy.textContent = 'Copied';
     });
   }

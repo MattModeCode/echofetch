@@ -2,6 +2,10 @@ export const DEFAULTS = {
   // Capping resolution at download time is what actually prevents multi-GB files;
   // nothing downstream can undo having fetched the 1080p variant.
   maxHeight: 720,
+  // Echo360 publishes audio as its own rendition, so a video stream on its own is
+  // silent. Fetching the companion track by default is the only way a downloaded
+  // lecture has sound without a second trip to the site.
+  includeAudio: true,
   audioOnlyDefault: false,
   filenameTemplate: '{title}',
   concurrency: 6

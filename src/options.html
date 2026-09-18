@@ -29,6 +29,16 @@
 
     <div class="field">
       <label class="inline">
+        <input type="checkbox" id="includeAudio">
+        <span>Download audio with video</span>
+      </label>
+      <p class="muted">Echo360 publishes audio separately, so a video on its own is
+        silent. This saves the audio beside it as a second file, and the finished
+        screen offers the one-line ffmpeg command that merges them.</p>
+    </div>
+
+    <div class="field">
+      <label class="inline">
         <input type="checkbox" id="audioOnlyDefault">
         <span>Prefer audio only</span>
       </label>
