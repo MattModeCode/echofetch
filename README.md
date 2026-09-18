@@ -82,21 +82,6 @@ Right-click the icon and choose Options, or use the Settings link in the popup.
 
 Settings sync across the Chrome profiles you are signed into.
 
-## Settings
-
-Right-click the icon and choose Options, or use the Settings link in the popup.
-
-- **Default quality** (default 720p) — pre-selects the largest stream at or below
-  this height. This is the setting that matters. Capping quality at download time is
-  the only thing that reliably keeps lectures off multiple gigabytes; nothing done
-  afterwards can undo having fetched the 1080p variant.
-- **Prefer audio only** — select the audio track by default when one exists.
-- **Filename** — supports `{title}` and `{date}`.
-- **Parallel segment downloads** (default 6) — lower it if the campus network
-  throttles you or transfers keep failing partway.
-
-Settings sync across the Chrome profiles you are signed into.
-
 ## Output
 
 Files land in your normal downloads folder.
