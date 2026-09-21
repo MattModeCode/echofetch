@@ -85,15 +85,17 @@ async function buildOptions(playlists) {
       });
     }
 
-    for (const rendition of audioRenditions(audioGroups)) {
+    // A lecture has one soundtrack. Echo360 often publishes it several times over —
+    // once per rendition group, once per recording — and every copy sounds the same,
+    // so showing more than one row is a choice nobody can make.
+    const [rendition] = audioRenditions(audioGroups);
+    if (rendition && !audio.length) {
       audio.push({
         kind: 'audio',
         url: rendition.url,
         label: 'Audio only',
-        sub: 'Sound without the picture — a fraction of the size',
         height: 0,
-        bytes: duration ? (ASSUMED_AUDIO_BITRATE / 8) * duration : 0,
-        estimated: true
+        bytes: duration ? (ASSUMED_AUDIO_BITRATE / 8) * duration : 0
       });
     }
   }
@@ -151,8 +153,7 @@ function buildRow(option, index, isDefault) {
 
   const size = document.createElement('span');
   size.className = 'size';
-  const formatted = formatSize(option.bytes);
-  size.textContent = formatted ? `${option.estimated ? '~' : ''}${formatted}` : '';
+  size.textContent = formatSize(option.bytes) || '';
 
   label.append(input, stack, size);
   li.append(label);
@@ -181,7 +182,7 @@ function renderPicker(title, pageUrl, groups, settings) {
       'This lecture was published without sound, so these downloads have no audio.';
   } else if (!groups.audio.length) {
     note.textContent =
-      'No audio-only version exists for this lecture. Take the smallest size and drop the picture with the command offered once it has saved.';
+      'This lecture has no audio-only version. Take the smallest size instead.';
   } else {
     note.textContent = '';
   }
@@ -263,10 +264,10 @@ function renderJob(job) {
 
   const root = show('tpl-progress');
   root.querySelector('[data-title]').textContent = job.title;
-  const ratio = job.total ? job.done / job.total : 0;
+  const ratio = job.total ? Math.min(1, Math.max(0, job.done / job.total)) : 0;
   root.querySelector('[data-fill]').style.transform = `scaleX(${ratio})`;
   root.querySelector('[data-detail]').textContent = job.total
-    ? `${job.done} / ${job.total} segments · ${formatSize(job.bytes) || '0 MB'}`
+    ? `${Math.floor(ratio * 100)}%`
     : 'Reading the playlist…';
   root.querySelector('[data-cancel]').addEventListener('click', () => send({ type: 'cancel' }));
 }
