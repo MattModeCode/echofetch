@@ -5,7 +5,7 @@
 // would kill a lecture-length transfer partway through; the offscreen document is
 // the only place a long-running fetch loop survives.
 
-import { getSettings, applyTemplate } from './settings.js';
+import { getSettings, applyTemplate, resolveFolder } from './settings.js';
 
 const OFFSCREEN_PATH = 'src/offscreen.html';
 const PLAYLIST_PATTERN = /\.m3u8(\?|$)/i;
@@ -80,10 +80,13 @@ function sanitizeFilename(name) {
     .slice(0, 120) || 'lecture';
 }
 
-async function startDownload({ variantUrl, audioUrl = null, title, kind = 'video' }) {
+async function startDownload({ variantUrl, audioUrl = null, title, pageUrl = '', kind = 'video' }) {
   const job = {
     id: `job-${Date.now()}`,
     title,
+    // Kept so folder rules can match on the Echo360 section id, which outlives the
+    // lecture title from week to week.
+    url: pageUrl,
     kind,
     withAudio: Boolean(audioUrl),
     done: 0,
@@ -110,8 +113,8 @@ async function startDownload({ variantUrl, audioUrl = null, title, kind = 'video
   }
 }
 
-function saveFile(url, filename) {
-  return chrome.downloads.download({ url, filename, saveAs: false }).then(
+function saveFile(url, filename, saveAs) {
+  return chrome.downloads.download({ url, filename, saveAs }).then(
     (downloadId) =>
       new Promise((resolve, reject) => {
         const onChanged = (delta) => {
@@ -137,20 +140,26 @@ function saveFile(url, filename) {
  */
 async function deliver({ files }) {
   const job = await readJob();
-  const { filenameTemplate } = await getSettings();
+  const settings = await getSettings();
   const stem = sanitizeFilename(
-    applyTemplate(filenameTemplate, {
+    applyTemplate(settings.filenameTemplate, {
       title: job?.title,
       date: new Date().toISOString().slice(0, 10)
     })
   );
+  // A per-course rule beats the default folder; both are relative to the browser's
+  // download directory, which is as far as chrome.downloads lets an extension reach.
+  const folder = resolveFolder(job?.title, job?.url, settings);
+  const prefix = folder ? `${folder}/` : '';
 
   try {
     const filenames = [];
     for (const file of files) {
       // Sequential: two concurrent downloads land in an unpredictable order, and the
       // second can inherit a " (1)" suffix that breaks the shared stem.
-      filenames.push(await saveFile(file.blobUrl, `${stem}.${file.extension}`));
+      filenames.push(
+        await saveFile(file.blobUrl, `${prefix}${stem}.${file.extension}`, settings.askEachTime)
+      );
     }
     await writeJob({ ...job, state: 'complete', filename: filenames[0], filenames });
   } catch (error) {

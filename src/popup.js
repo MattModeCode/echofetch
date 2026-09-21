@@ -57,10 +57,10 @@ async function buildOptions(playlists) {
       continue;
     }
 
-    const source = playlists.length > 1 ? `Stream ${index + 1}` : 'Lecture';
+    const source = playlists.length > 1 ? `Recording ${index + 1}` : '';
 
     if (!isMasterPlaylist(text)) {
-      video.push({ kind: 'video', url: entry.url, label: source, sub: 'single quality', height: 0 });
+      video.push({ kind: 'video', url: entry.url, label: 'Video', source, height: 0 });
       continue;
     }
 
@@ -80,31 +80,46 @@ async function buildOptions(playlists) {
         source,
         height: variant.height || 0,
         aspect,
-        label: variant.height ? `${variant.height}p${aspect ? ` · ${aspect}` : ''}` : source,
+        label: variant.height ? `${variant.height}p` : 'Video',
         bytes: videoBytes + (companion && duration ? (ASSUMED_AUDIO_BITRATE / 8) * duration : 0)
       });
     }
 
-    for (const rendition of audioRenditions(audioGroups)) {
+    // A lecture has one soundtrack. Echo360 often publishes it several times over —
+    // once per rendition group, once per recording — and every copy sounds the same,
+    // so showing more than one row is a choice nobody can make.
+    const [rendition] = audioRenditions(audioGroups);
+    if (rendition && !audio.length) {
       audio.push({
         kind: 'audio',
         url: rendition.url,
         label: 'Audio only',
-        sub: `${rendition.name} · separate track`,
         height: 0,
-        bytes: duration ? (ASSUMED_AUDIO_BITRATE / 8) * duration : 0,
-        estimated: true
+        bytes: duration ? (ASSUMED_AUDIO_BITRATE / 8) * duration : 0
       });
     }
   }
 
-  for (const option of video) {
-    const feed = guessFeed(option, video);
-    const sound = option.audioUrl ? 'with audio' : 'no audio track published';
-    option.sub = [option.source, feed, sound].filter(Boolean).join(' — ');
+  // A video rendition with no companion audio downloads silently, which is never what
+  // anyone wants. Hiding those is only safe while something with sound remains, so a
+  // lecture published without any audio at all keeps its options and gets a warning.
+  const withSound = video.filter((option) => option.audioUrl);
+  const silentOnly = withSound.length === 0;
+  const offered = silentOnly ? video : withSound;
+
+  for (const option of offered) {
+    option.sub = [option.source, describeFeed(option, offered)].filter(Boolean).join(' · ');
   }
 
-  return { video, audio, duration };
+  return { video: offered, audio, duration, silentOnly };
+}
+
+/** Plain words for what the camera was pointed at, and only when there is a choice. */
+function describeFeed(option, allOptions) {
+  const feed = guessFeed(option, allOptions);
+  if (feed === 'likely screen capture') return 'Slides';
+  if (feed === 'likely presenter camera') return 'Presenter camera';
+  return null;
 }
 
 function pickDefault({ video, audio }, settings) {
@@ -138,15 +153,14 @@ function buildRow(option, index, isDefault) {
 
   const size = document.createElement('span');
   size.className = 'size';
-  const formatted = formatSize(option.bytes);
-  size.textContent = formatted ? `${option.estimated ? '~' : ''}${formatted}` : '';
+  size.textContent = formatSize(option.bytes) || '';
 
   label.append(input, stack, size);
   li.append(label);
   return li;
 }
 
-function renderPicker(title, groups, settings) {
+function renderPicker(title, pageUrl, groups, settings) {
   const options = [...groups.video, ...groups.audio];
   const root = show('tpl-picker');
   const preselected = pickDefault(groups, settings);
@@ -154,7 +168,7 @@ function renderPicker(title, groups, settings) {
   root.querySelector('[data-title]').textContent = title;
   root.querySelector('[data-meta]').textContent = [
     formatDuration(groups.duration),
-    groups.video.length > 1 ? `${groups.video.length} qualities` : null
+    options.length > 1 ? 'Pick a size' : null
   ]
     .filter(Boolean)
     .join(' · ');
@@ -163,9 +177,15 @@ function renderPicker(title, groups, settings) {
   options.forEach((option, index) => list.append(buildRow(option, index, option === preselected)));
 
   const note = root.querySelector('[data-note]');
-  note.textContent = groups.audio.length
-    ? ''
-    : 'No separate audio track is published for this lecture. For audio only, take the smallest video and strip the picture with the ffmpeg command offered after the download.';
+  if (groups.silentOnly) {
+    note.textContent =
+      'This lecture was published without sound, so these downloads have no audio.';
+  } else if (!groups.audio.length) {
+    note.textContent =
+      'This lecture has no audio-only version. Take the smallest size instead.';
+  } else {
+    note.textContent = '';
+  }
 
   root.querySelector('[data-start]').addEventListener('click', async (event) => {
     const chosen = options[Number(view.querySelector('input[name=stream]:checked').value)];
@@ -193,6 +213,7 @@ function renderPicker(title, groups, settings) {
       variantUrl: chosen.url,
       audioUrl,
       title,
+      pageUrl,
       kind: chosen.kind
     });
     renderJob({ title, done: 0, total: 0, bytes: 0, state: 'starting' });
@@ -243,10 +264,10 @@ function renderJob(job) {
 
   const root = show('tpl-progress');
   root.querySelector('[data-title]').textContent = job.title;
-  const ratio = job.total ? job.done / job.total : 0;
+  const ratio = job.total ? Math.min(1, Math.max(0, job.done / job.total)) : 0;
   root.querySelector('[data-fill]').style.transform = `scaleX(${ratio})`;
   root.querySelector('[data-detail]').textContent = job.total
-    ? `${job.done} / ${job.total} segments · ${formatSize(job.bytes) || '0 MB'}`
+    ? `${Math.floor(ratio * 100)}%`
     : 'Reading the playlist…';
   root.querySelector('[data-cancel]').addEventListener('click', () => send({ type: 'cancel' }));
 }
@@ -283,7 +304,7 @@ async function start() {
     return renderError('Found a playlist but could not read it. Try replaying the lecture.');
   }
 
-  renderPicker(cleanTitle(tab.title), groups, settings);
+  renderPicker(cleanTitle(tab.title), tab.url, groups, settings);
 }
 
 document.getElementById('open-options').addEventListener('click', (event) => {

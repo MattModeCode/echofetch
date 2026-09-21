@@ -18,16 +18,20 @@ There is no store listing. Load it unpacked:
 2. Click the EchoFetch icon.
 3. Pick a stream and click **Download**.
 
-Each row shows the resolution, aspect ratio, and an estimated file size, so you can
-tell what you are committing to before you start. Where a lecture publishes two
-feeds — a presenter camera and a screen capture — EchoFetch labels which is likely
-which from the aspect ratio and resolution. That label is a guess and says so; the
-resolution and size beside it are not.
+Each row shows the resolution and a file size, so you can tell what you are
+committing to before you start. The size is worked out from the stream's bitrate
+and the lecture's length, so treat it as close rather than exact. Where a lecture
+publishes two feeds — a presenter camera and a screen capture — EchoFetch labels
+which is likely which from the aspect ratio and resolution. That label is a guess.
 
-**Audio only** appears as its own row when the lecture publishes a separate audio
-track, at roughly 60 MB an hour instead of several GB. If no separate track exists,
-the picker says so rather than hiding the option, and the fix is to take the
-smallest video and strip the picture with the ffmpeg command offered afterwards.
+**Audio only** gets one row when the lecture publishes a separate audio track, at
+roughly 60 MB an hour instead of several GB. Echo360 often publishes that track
+more than once; every copy is the same sound, so the picker shows it once. If no
+separate track exists, the picker says so rather than hiding the option, and the
+fix is to take the smallest video and strip the picture with the ffmpeg command
+offered afterwards.
+
+While a download runs, the popup shows one bar and one percentage.
 
 The first download from a new lecture host asks for permission to read that host.
 Echo360 serves media from CDN domains that are not known ahead of time, so the
