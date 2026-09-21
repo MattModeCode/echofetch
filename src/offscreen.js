@@ -9,6 +9,8 @@ import {
   rangeHeader
 } from './hls.js';
 import { readRoot, hasWriteAccess, writeInto } from './folder-handle.js';
+import { muxAudioIntoVideo } from './mp4.js';
+import { renderTranscript, TRANSCRIPT_FORMATS } from './transcript.js';
 
 const DEFAULT_CONCURRENCY = 6;
 const MAX_ATTEMPTS = 3;
@@ -158,6 +160,24 @@ async function prepareStream(url) {
   return { parsed, mediaUrl };
 }
 
+/**
+ * One contiguous buffer from the fetched segments. Each part is released as it is
+ * copied, so the peak is the finished stream plus one segment rather than two copies
+ * of a lecture — the difference between a 90-minute recording fitting in the tab's
+ * memory and not.
+ */
+function joinParts(parts) {
+  const total = parts.reduce((sum, part) => sum + part.byteLength, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (let i = 0; i < parts.length; i++) {
+    out.set(new Uint8Array(parts[i]), offset);
+    offset += parts[i].byteLength;
+    parts[i] = null;
+  }
+  return out;
+}
+
 async function assembleStream({ parsed, mediaUrl }, kind, concurrency, onProgress) {
   const refreshSegments = async () => {
     const refreshed = await loadMediaPlaylist(mediaUrl);
@@ -175,18 +195,68 @@ async function assembleStream({ parsed, mediaUrl }, kind, concurrency, onProgres
   parts.push(...(await runPool(parsed.segments, refreshSegments, onProgress, concurrency)));
 
   const { extension, mime } = containerFor(parsed, kind);
-  const blob = new Blob(parts, { type: mime });
-  return { blob, blobUrl: URL.createObjectURL(blob), extension };
+  return { bytes: joinParts(parts), extension, mime };
+}
+
+function toFile(stream, role) {
+  const blob = new Blob([stream.bytes], { type: stream.mime });
+  return { blob, blobUrl: URL.createObjectURL(blob), extension: stream.extension, role };
 }
 
 /**
  * Echo360 publishes audio as its own rendition, so a video stream on its own is
  * silent. When the picker passes an audio URL alongside the video one, both are
- * fetched in the same job and delivered as a matched pair.
+ * fetched in the same job and muxed into a single MP4 before delivery.
  */
 // Blobs cannot travel through runtime.sendMessage, so the finished files stay here
 // and the service worker addresses them by index when it asks for a disk write.
 let assembled = [];
+
+/**
+ * One file where the two streams can be combined, two where they cannot. Muxing is
+ * a byte-level rewrite with no decoding, so it fails only on shapes it does not
+ * recognize — an MPEG-TS packaging, a stream with no timed fragments. Falling back
+ * to the old side-by-side pair keeps those lectures downloadable instead of turning
+ * a working download into an error.
+ */
+function combine(video, audio) {
+  const fragmented = video.extension === 'mp4' && audio.extension === 'm4a';
+  if (fragmented) {
+    try {
+      const blob = new Blob(muxAudioIntoVideo(video.bytes, audio.bytes), { type: 'video/mp4' });
+      return [{ blob, blobUrl: URL.createObjectURL(blob), extension: 'mp4', role: 'video' }];
+    } catch (error) {
+      console.warn('EchoFetch: muxing failed, saving the pair instead.', error);
+    }
+  }
+  return [toFile(video, 'video'), toFile(audio, 'audio')];
+}
+
+/**
+ * The transcript Echo360 already holds. No playlist, no segments, no transcription —
+ * one request, reshaped into the format the picker asked for.
+ */
+async function downloadTranscript({ transcriptUrl, format, jobId }) {
+  cancelled = false;
+  assembled = [];
+  chrome.runtime.sendMessage({ type: 'progress', jobId, patch: { done: 0, total: 1, bytes: 0 } });
+
+  const raw = await fetchWithSession(transcriptUrl, { asText: true });
+  const { extension, mime } = TRANSCRIPT_FORMATS[format] || TRANSCRIPT_FORMATS.vtt;
+  const blob = new Blob([renderTranscript(raw, format)], { type: mime });
+
+  assembled = [blob];
+  chrome.runtime.sendMessage({
+    type: 'progress',
+    jobId,
+    patch: { done: 1, total: 1, bytes: blob.size }
+  });
+  chrome.runtime.sendMessage({
+    type: 'assembled',
+    jobId,
+    files: [{ blobUrl: URL.createObjectURL(blob), extension, role: 'transcript' }]
+  });
+}
 
 async function download({ variantUrl, audioUrl, jobId, kind, concurrency }) {
   cancelled = false;
@@ -216,18 +286,17 @@ async function download({ variantUrl, audioUrl, jobId, kind, concurrency }) {
   };
   post(0, 0);
 
-  const files = [];
   const primary = await assembleStream(video, kind, concurrency, post);
-  files.push({ ...primary, role: kind });
+  let companion = null;
 
   if (audio) {
     // The second stream restarts its own counters, so carry the first one's totals.
     baseDone = video.parsed.segments.length;
     baseBytes = streamBytes;
-    const companion = await assembleStream(audio, 'audio', concurrency, post);
-    files.push({ ...companion, role: 'audio' });
+    companion = await assembleStream(audio, 'audio', concurrency, post);
   }
 
+  const files = companion ? combine(primary, companion) : [toFile(primary, kind)];
   assembled = files.map((file) => file.blob);
   chrome.runtime.sendMessage({
     type: 'assembled',
@@ -270,13 +339,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   if (message.type === 'download') {
-    download({
-      variantUrl: message.variantUrl,
-      audioUrl: message.audioUrl || null,
-      jobId: message.jobId,
-      kind: message.kind || 'video',
-      concurrency: message.concurrency || DEFAULT_CONCURRENCY
-    }).catch((error) => {
+    const run =
+      message.kind === 'transcript'
+        ? downloadTranscript({
+            transcriptUrl: message.transcriptUrl,
+            format: message.format,
+            jobId: message.jobId
+          })
+        : download({
+            variantUrl: message.variantUrl,
+            audioUrl: message.audioUrl || null,
+            jobId: message.jobId,
+            kind: message.kind || 'video',
+            concurrency: message.concurrency || DEFAULT_CONCURRENCY
+          });
+
+    run.catch((error) => {
       // Stop any sibling workers still in flight before reporting.
       cancelled = true;
       if (error.message === 'cancelled') return;

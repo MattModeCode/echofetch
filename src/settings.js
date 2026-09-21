@@ -3,8 +3,8 @@ export const DEFAULTS = {
   // nothing downstream can undo having fetched the 1080p variant.
   maxHeight: 720,
   // Echo360 publishes audio as its own rendition, so a video stream on its own is
-  // silent. Fetching the companion track by default is the only way a downloaded
-  // lecture has sound without a second trip to the site.
+  // silent. Fetching the companion track and muxing it in is the only way a
+  // downloaded lecture has sound without a second trip to the site.
   includeAudio: true,
   audioOnlyDefault: false,
   filenameTemplate: '{title}',
