@@ -10,58 +10,110 @@
   <header class="bar">
     <span class="mark" aria-hidden="true"></span>
     <h1>EchoFetch settings</h1>
+    <p class="saved" id="saved" role="status" hidden>Saved</p>
   </header>
 
   <main class="form">
-    <div class="field">
-      <label for="maxHeight">Default quality</label>
-      <select id="maxHeight">
-        <option value="360">360p — smallest</option>
-        <option value="480">480p</option>
-        <option value="720">720p — recommended</option>
-        <option value="1080">1080p</option>
-        <option value="9999">Highest available</option>
-      </select>
-      <p class="muted">Pre-selects the largest stream at or below this height. Slides
-        stay readable at 720p, and capping here is what keeps files off 8 GB — nothing
-        afterwards can undo having fetched the 1080p variant.</p>
-    </div>
+    <section class="group" aria-labelledby="g-quality">
+      <h2 id="g-quality">Quality</h2>
 
-    <div class="field">
-      <label class="inline">
-        <input type="checkbox" id="includeAudio">
-        <span>Download audio with video</span>
-      </label>
-      <p class="muted">Echo360 publishes audio separately, so a video on its own is
-        silent. This saves the audio beside it as a second file, and the finished
-        screen offers the one-line ffmpeg command that merges them.</p>
-    </div>
+      <div class="field">
+        <label for="maxHeight">Preferred size</label>
+        <select id="maxHeight">
+          <option value="360">360p — smallest</option>
+          <option value="480">480p</option>
+          <option value="720">720p — recommended</option>
+          <option value="1080">1080p</option>
+          <option value="9999">Largest available</option>
+        </select>
+        <p class="muted">Slides stay readable at 720p. Choosing here is what keeps a
+          lecture off several gigabytes — nothing afterwards can undo downloading the
+          bigger one.</p>
+      </div>
 
-    <div class="field">
-      <label class="inline">
+      <label class="check">
         <input type="checkbox" id="audioOnlyDefault">
-        <span>Prefer audio only</span>
+        <span>
+          <span class="check-title">Prefer audio only</span>
+          <span class="muted">Roughly 60 MB an hour instead of several gigabytes, when
+            the lecture offers it.</span>
+        </span>
       </label>
-      <p class="muted">When a lecture publishes a separate audio track, select it by
-        default. Roughly 60 MB an hour instead of several GB.</p>
-    </div>
 
-    <div class="field">
-      <label for="filenameTemplate">Filename</label>
-      <input type="text" id="filenameTemplate" spellcheck="false">
-      <p class="muted">Tokens: <code>{title}</code>, <code>{date}</code>. The extension
-        is added automatically.</p>
-    </div>
+      <label class="check">
+        <input type="checkbox" id="includeAudio">
+        <span>
+          <span class="check-title">Save the sound alongside the video</span>
+          <span class="muted">Echo360 publishes sound separately, so this saves a second
+            file. The finished screen offers a one-line command that merges the two.</span>
+        </span>
+      </label>
+    </section>
 
-    <div class="field">
-      <label for="concurrency">Parallel segment downloads</label>
-      <input type="number" id="concurrency" min="1" max="12" step="1">
-      <p class="muted">Lower this if the campus network throttles you or downloads
-        keep failing partway.</p>
-    </div>
+    <section class="group" aria-labelledby="g-where">
+      <h2 id="g-where">Where files go</h2>
 
-    <p class="saved" id="saved" role="status" hidden>Saved</p>
+      <div class="field">
+        <label for="downloadFolder">Folder</label>
+        <input type="text" id="downloadFolder" spellcheck="false" placeholder="Lectures">
+        <p class="muted">A folder inside your Downloads folder — for example
+          <code>School/Psych</code>. Chrome does not let an extension save anywhere
+          else, so leading slashes and <code>..</code> are removed. Leave it empty to
+          save straight into Downloads.</p>
+      </div>
+
+      <div class="field">
+        <label for="filenameTemplate">File name</label>
+        <input type="text" id="filenameTemplate" spellcheck="false">
+        <p class="muted">Use <code>{title}</code> and <code>{date}</code>. The file
+          extension is added for you.</p>
+      </div>
+
+      <label class="check">
+        <input type="checkbox" id="askEachTime">
+        <span>
+          <span class="check-title">Ask me where to save each time</span>
+          <span class="muted">Chrome opens its save dialog instead, and the folder above
+            is ignored.</span>
+        </span>
+      </label>
+    </section>
+
+    <section class="group" aria-labelledby="g-rules">
+      <h2 id="g-rules">Send a course to its own folder</h2>
+      <p class="muted">Each rule looks for a word in the lecture title, or in the page
+        address when the title changes week to week. The first rule that matches wins;
+        anything unmatched goes to the folder above.</p>
+
+      <ul class="rules" id="rules" role="list"></ul>
+      <p class="muted empty" id="rules-empty">No rules yet.</p>
+      <button type="button" class="ghost add" id="add-rule">Add a rule</button>
+    </section>
+
+    <section class="group" aria-labelledby="g-network">
+      <h2 id="g-network">Network</h2>
+
+      <div class="field">
+        <label for="concurrency">Pieces downloaded at once</label>
+        <input type="number" id="concurrency" min="1" max="12" step="1">
+        <p class="muted">Lower this if campus Wi-Fi throttles you or downloads keep
+          failing partway.</p>
+      </div>
+    </section>
   </main>
+
+  <template id="tpl-rule">
+    <li class="rule">
+      <select class="rule-kind" aria-label="Match against">
+        <option value="title">Title contains</option>
+        <option value="url">Address contains</option>
+      </select>
+      <input type="text" class="rule-match" spellcheck="false" placeholder="PSYCH 1X03" aria-label="Text to look for">
+      <span class="arrow" aria-hidden="true">→</span>
+      <input type="text" class="rule-folder" spellcheck="false" placeholder="School/Psych" aria-label="Folder">
+      <button type="button" class="remove" aria-label="Remove this rule">Remove</button>
+    </li>
+  </template>
 
   <script type="module" src="options.js"></script>
 </body>

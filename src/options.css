@@ -1,14 +1,40 @@
 /* Overrides popup.css, which is sized for the 340px popup. */
 body {
   width: auto;
-  max-width: 560px;
+  max-width: 620px;
+}
+
+.bar {
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  z-index: 1;
 }
 
 .form {
   display: flex;
   flex-direction: column;
-  gap: 22px;
-  padding: 20px 16px 40px;
+  gap: 14px;
+  padding: 16px 16px 48px;
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+}
+
+.group h2 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 
 .field {
@@ -21,21 +47,32 @@ body {
   font-weight: 600;
 }
 
-.field .muted {
+.muted {
   font-size: 12px;
 }
 
-.inline {
+/* The label wraps the hint as well as the title, so the whole block is one hit target. */
+.check {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 600;
+  align-items: flex-start;
+  gap: 10px;
   cursor: pointer;
 }
 
-.inline input {
+.check > span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.check-title {
+  font-weight: 600;
+}
+
+.check input {
   accent-color: var(--accent);
-  margin: 0;
+  margin: 2px 0 0;
+  flex: none;
 }
 
 select,
@@ -47,13 +84,80 @@ input[type="number"] {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 7px;
-  max-width: 300px;
+  max-width: 320px;
+  min-width: 0;
+}
+
+select:hover,
+input[type="text"]:hover,
+input[type="number"]:hover {
+  border-color: var(--muted);
 }
 
 select:focus-visible,
 input:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+
+input:disabled,
+.check input:disabled + span {
+  opacity: 0.5;
+}
+
+.rules {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+}
+
+.rules:empty {
+  display: none;
+}
+
+.rule {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.rule select,
+.rule input {
+  max-width: none;
+}
+
+.arrow {
+  color: var(--muted);
+}
+
+.rule .remove {
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  background: transparent;
+  color: var(--muted);
+  border-color: var(--line);
+}
+
+.rule .remove:hover {
+  color: var(--bad);
+  border-color: var(--bad);
+}
+
+.add {
+  align-self: flex-start;
+}
+
+.empty {
+  margin: 0;
+}
+
+.empty[hidden] {
+  display: none;
 }
 
 code {
@@ -64,7 +168,18 @@ code {
 }
 
 .saved {
-  margin: 0;
+  margin-left: auto;
   color: var(--ok);
+  font-size: 12px;
   font-weight: 600;
+}
+
+@media (max-width: 520px) {
+  .rule {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .rule .arrow {
+    display: none;
+  }
 }
