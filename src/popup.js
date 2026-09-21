@@ -10,6 +10,7 @@ import {
   formatDuration
 } from './hls.js';
 import { getSettings } from './settings.js';
+import { TRANSCRIPT_FORMATS } from './transcript.js';
 
 const ECHO_HOST = /(^|\.)echo360\.(org|ca|net\.au|org\.au|org\.uk)$/i;
 const ASSUMED_AUDIO_BITRATE = 128_000;
@@ -44,7 +45,36 @@ async function probeDuration(variantUrl) {
   }
 }
 
-async function buildOptions(playlists) {
+/**
+ * Echo360 publishes captions under several names and sometimes more than one URL per
+ * lecture. The one whose path says transcript is the full text; a .vtt caption file
+ * is the same content and an acceptable second choice.
+ */
+function pickTranscript(entries) {
+  if (!entries.length) return null;
+  return (
+    entries.find((entry) => /transcript/i.test(new URL(entry.url).pathname)) ||
+    entries.find((entry) => /\.vtt|\.srt/i.test(new URL(entry.url).pathname)) ||
+    entries[0]
+  );
+}
+
+function transcriptOptions(entries) {
+  const source = pickTranscript(entries);
+  if (!source) return [];
+
+  return Object.entries(TRANSCRIPT_FORMATS).map(([format, spec]) => ({
+    kind: 'transcript',
+    url: source.url,
+    format,
+    label: spec.label,
+    sub: spec.sub,
+    height: 0,
+    bytes: 0
+  }));
+}
+
+async function buildOptions(playlists, transcripts) {
   const video = [];
   const audio = [];
   let duration = 0;
@@ -111,7 +141,7 @@ async function buildOptions(playlists) {
     option.sub = [option.source, describeFeed(option, offered)].filter(Boolean).join(' · ');
   }
 
-  return { video: offered, audio, duration, silentOnly };
+  return { video: offered, audio, transcript: transcriptOptions(transcripts), duration, silentOnly };
 }
 
 /** Plain words for what the camera was pointed at, and only when there is a choice. */
@@ -122,8 +152,9 @@ function describeFeed(option, allOptions) {
   return null;
 }
 
-function pickDefault({ video, audio }, settings) {
+function pickDefault({ video, audio, transcript }, settings) {
   if (settings.audioOnlyDefault && audio.length) return audio[0];
+  if (!video.length && !audio.length) return transcript[0];
   const withinCap = video.filter((o) => o.height && o.height <= settings.maxHeight);
   const pool = withinCap.length ? withinCap : video;
   return pool.reduce((a, b) => ((b.height || 0) > (a.height || 0) ? b : a), pool[0]);
@@ -161,7 +192,7 @@ function buildRow(option, index, isDefault) {
 }
 
 function renderPicker(title, pageUrl, groups, settings) {
-  const options = [...groups.video, ...groups.audio];
+  const options = [...groups.video, ...groups.audio, ...groups.transcript];
   const root = show('tpl-picker');
   const preselected = pickDefault(groups, settings);
 
@@ -177,23 +208,27 @@ function renderPicker(title, pageUrl, groups, settings) {
   options.forEach((option, index) => list.append(buildRow(option, index, option === preselected)));
 
   const note = root.querySelector('[data-note]');
+  const notes = [];
   if (groups.silentOnly) {
-    note.textContent =
-      'This lecture was published without sound, so these downloads have no audio.';
+    notes.push('This lecture was published without sound, so these downloads have no audio.');
   } else if (!groups.audio.length) {
-    note.textContent =
-      'This lecture has no audio-only version. Take the smallest size instead.';
-  } else {
-    note.textContent = '';
+    notes.push('This lecture has no audio-only version. Take the smallest size instead.');
   }
+  if (!groups.transcript.length) {
+    notes.push(
+      'No transcript found yet. Open the transcript panel on the lecture page, then reopen this popup.'
+    );
+  }
+  note.textContent = notes.join(' ');
 
   root.querySelector('[data-start]').addEventListener('click', async (event) => {
     const chosen = options[Number(view.querySelector('input[name=stream]:checked').value)];
-    const audioUrl = settings.includeAudio ? chosen.audioUrl || null : null;
+    const isTranscript = chosen.kind === 'transcript';
+    const audioUrl = !isTranscript && settings.includeAudio ? chosen.audioUrl || null : null;
     const host = new URL(chosen.url).host;
 
-    // The audio rendition can sit on a different origin, and both must be granted
-    // before the job starts or the second stream fails halfway through.
+    // The audio rendition and the transcript can each sit on a different origin, and
+    // every one must be granted before the job starts or a fetch fails halfway through.
     const origins = [
       ...new Set(
         [chosen.url, audioUrl].filter(Boolean).map((url) => `${new URL(url).origin}/*`)
@@ -210,7 +245,9 @@ function renderPicker(title, pageUrl, groups, settings) {
     event.target.disabled = true;
     await send({
       type: 'startDownload',
-      variantUrl: chosen.url,
+      variantUrl: isTranscript ? null : chosen.url,
+      transcriptUrl: isTranscript ? chosen.url : null,
+      format: chosen.format || null,
       audioUrl,
       title,
       pageUrl,
@@ -251,7 +288,7 @@ function renderDone(job) {
       await navigator.clipboard.writeText(mergeCommand(filenames));
       copy.textContent = 'Copied';
     });
-  } else if (job.kind === 'audio' || !filenames.length) {
+  } else if (job.kind === 'audio' || job.kind === 'transcript' || !filenames.length) {
     copy.remove();
   } else {
     copy.addEventListener('click', async () => {
@@ -291,8 +328,8 @@ async function start() {
   const { job } = await send({ type: 'getJob' });
   if (job && ['starting', 'running'].includes(job.state)) return renderJob(job);
 
-  const { playlists } = await send({ type: 'getPlaylists', tabId: tab.id });
-  if (!playlists.length) {
+  const { playlists, transcripts } = await send({ type: 'getPlaylists', tabId: tab.id });
+  if (!playlists.length && !transcripts.length) {
     const root = show('tpl-waiting');
     root.querySelector('[data-widen]').addEventListener('click', async () => {
       // webRequest only reports URLs the extension holds host permission for, so a
@@ -305,8 +342,11 @@ async function start() {
     return root;
   }
 
-  const [groups, settings] = await Promise.all([buildOptions(playlists), getSettings()]);
-  if (!groups.video.length && !groups.audio.length) {
+  const [groups, settings] = await Promise.all([
+    buildOptions(playlists, transcripts),
+    getSettings()
+  ]);
+  if (!groups.video.length && !groups.audio.length && !groups.transcript.length) {
     return renderError('Found a playlist but could not read it. Try replaying the lecture.');
   }
 

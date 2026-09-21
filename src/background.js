@@ -9,26 +9,39 @@ import { getSettings, applyTemplate, resolveFolder } from './settings.js';
 
 const OFFSCREEN_PATH = 'src/offscreen.html';
 const PLAYLIST_PATTERN = /\.m3u8(\?|$)/i;
+// Echo360 serves the transcript the player's own panel reads. The endpoint's shape
+// differs between institutions and versions, so match the request rather than
+// assume a URL: transcript or caption in the path, or a subtitle file extension.
+const TRANSCRIPT_PATTERN = /(transcript|caption|\.vtt(\?|$)|\.srt(\?|$))/i;
 
 /** tabId -> Map<url, {url, seenAt}> */
 const captured = new Map();
+const transcripts = new Map();
 
-function recordPlaylist(tabId, url) {
+function record(store, tabId, url, pattern) {
   if (tabId < 0) return;
-  if (!PLAYLIST_PATTERN.test(url)) return;
-  const forTab = captured.get(tabId) || new Map();
+  if (!pattern.test(url)) return;
+  const forTab = store.get(tabId) || new Map();
   if (!forTab.has(url)) forTab.set(url, { url, seenAt: Date.now() });
-  captured.set(tabId, forTab);
+  store.set(tabId, forTab);
 }
 
 chrome.webRequest.onBeforeRequest.addListener(
-  (details) => recordPlaylist(details.tabId, details.url),
+  (details) => {
+    record(captured, details.tabId, details.url, PLAYLIST_PATTERN);
+    record(transcripts, details.tabId, details.url, TRANSCRIPT_PATTERN);
+  },
   { urls: ['<all_urls>'], types: ['xmlhttprequest', 'media', 'other'] }
 );
 
-chrome.tabs.onRemoved.addListener((tabId) => captured.delete(tabId));
+function forget(tabId) {
+  captured.delete(tabId);
+  transcripts.delete(tabId);
+}
+
+chrome.tabs.onRemoved.addListener(forget);
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (changeInfo.status === 'loading' && changeInfo.url) captured.delete(tabId);
+  if (changeInfo.status === 'loading' && changeInfo.url) forget(tabId);
 });
 
 async function readJob() {
@@ -79,7 +92,15 @@ function sanitizeFilename(name) {
     .slice(0, 120) || 'lecture';
 }
 
-async function startDownload({ variantUrl, audioUrl = null, title, pageUrl = '', kind = 'video' }) {
+async function startDownload({
+  variantUrl,
+  audioUrl = null,
+  transcriptUrl = null,
+  format = null,
+  title,
+  pageUrl = '',
+  kind = 'video'
+}) {
   const job = {
     id: `job-${Date.now()}`,
     title,
@@ -102,6 +123,8 @@ async function startDownload({ variantUrl, audioUrl = null, title, pageUrl = '',
       type: 'download',
       variantUrl,
       audioUrl,
+      transcriptUrl,
+      format,
       jobId: job.id,
       kind,
       concurrency
@@ -133,9 +156,10 @@ function saveFile(url, filename, saveAs) {
 }
 
 /**
- * A video and its companion audio arrive as two files. They share one stem and differ
- * only by extension, so `tools/merge-audio.mjs` and the offered ffmpeg command can
- * pair them without guessing.
+ * Normally one file: the companion audio is muxed into the video before it gets
+ * here. Where muxing could not be done the pair arrives instead, sharing one stem
+ * and differing only by extension, so `tools/merge-audio.mjs` and the offered ffmpeg
+ * command can pair them without guessing.
  */
 async function deliver({ files }) {
   let job = await readJob();
@@ -195,7 +219,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   switch (message.type) {
     case 'getPlaylists': {
       const forTab = captured.get(message.tabId);
-      sendResponse({ playlists: forTab ? [...forTab.values()] : [] });
+      const transcriptsForTab = transcripts.get(message.tabId);
+      sendResponse({
+        playlists: forTab ? [...forTab.values()] : [],
+        transcripts: transcriptsForTab ? [...transcriptsForTab.values()] : []
+      });
       return false;
     }
     case 'getJob': {
