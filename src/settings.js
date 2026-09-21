@@ -9,8 +9,9 @@ export const DEFAULTS = {
   audioOnlyDefault: false,
   filenameTemplate: '{title}',
   concurrency: 6,
-  // A folder beneath the browser's download directory. Chrome rejects anything
-  // absolute, so this can never be an arbitrary location on disk.
+  // A relative subfolder. Where the user picked a folder in Settings it sits inside
+  // that one; otherwise it sits inside the browser's download directory, which is as
+  // far as chrome.downloads reaches on its own. Absolute paths are rejected either way.
   downloadFolder: '',
   askEachTime: false,
   // [{ match, matchKind: 'title' | 'url', folder }] — first match wins.

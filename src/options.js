@@ -1,4 +1,11 @@
 import { getSettings, saveSettings, sanitizeFolder, DEFAULTS } from './settings.js';
+import {
+  canPickFolder,
+  chooseRoot,
+  clearRoot,
+  hasWriteAccess,
+  readRoot
+} from './folder-handle.js';
 
 const fields = {
   maxHeight: { el: document.getElementById('maxHeight'), read: (el) => Number(el.value) },
@@ -19,6 +26,13 @@ const fields = {
   }
 };
 
+const rootName = document.getElementById('rootName');
+const rootHint = document.getElementById('rootHint');
+const rootButtons = {
+  chooseRoot: document.getElementById('chooseRoot'),
+  clearRoot: document.getElementById('clearRoot')
+};
+
 const rulesList = document.getElementById('rules');
 const rulesEmpty = document.getElementById('rules-empty');
 const ruleTemplate = document.getElementById('tpl-rule');
@@ -33,9 +47,34 @@ function flashSaved() {
   }, 1600);
 }
 
-/** The folder field only decides anything when Chrome is not asking for the location. */
+/** The folder fields only decide anything when Chrome is not asking for the location. */
 function syncFolderEnabled() {
-  fields.downloadFolder.el.disabled = fields.askEachTime.el.checked;
+  const asking = fields.askEachTime.el.checked;
+  fields.downloadFolder.el.disabled = asking;
+  rootButtons.chooseRoot.disabled = asking || !canPickFolder();
+}
+
+/**
+ * Shows which folder is in effect. A handle can outlive its permission — closing
+ * Chrome is enough — so the name is only claimed while the write is still allowed.
+ */
+async function showRoot() {
+  const root = await readRoot();
+  const usable = await hasWriteAccess(root);
+
+  rootName.textContent = usable ? root.name : 'Your Downloads folder';
+  rootButtons.clearRoot.hidden = !root;
+  rootButtons.chooseRoot.textContent = usable ? 'Change folder…' : 'Choose folder…';
+
+  if (root && !usable) {
+    rootHint.textContent = `Chrome has lost access to ${root.name}. Choose it again to reconnect.`;
+  } else if (usable) {
+    rootHint.textContent = 'Downloads go straight here, with no save dialog.';
+  } else {
+    rootHint.textContent = canPickFolder()
+      ? 'Pick any folder on your computer. EchoFetch will keep saving there.'
+      : 'This browser cannot open a folder picker, so files go to your Downloads folder.';
+  }
 }
 
 function readRules() {
@@ -89,6 +128,7 @@ async function init() {
 
   settings.folderRules.forEach((rule) => addRule(rule));
   rulesEmpty.hidden = settings.folderRules.length > 0;
+  await showRoot();
   syncFolderEnabled();
 
   for (const [key, field] of Object.entries(fields)) {
@@ -102,6 +142,21 @@ async function init() {
       flashSaved();
     });
   }
+
+  rootButtons.chooseRoot.addEventListener('click', async () => {
+    try {
+      if (await chooseRoot()) flashSaved();
+    } catch (error) {
+      rootHint.textContent = `Could not open the folder picker: ${error.message}`;
+    }
+    await showRoot();
+  });
+
+  rootButtons.clearRoot.addEventListener('click', async () => {
+    await clearRoot();
+    await showRoot();
+    flashSaved();
+  });
 
   document.getElementById('add-rule').addEventListener('click', () => {
     addRule().querySelector('.rule-match').focus();

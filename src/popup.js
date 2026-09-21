@@ -234,6 +234,12 @@ function renderDone(job) {
   const filenames = job.filenames?.length ? job.filenames : [job.filename].filter(Boolean);
   root.querySelector('[data-filename]').textContent = filenames.join('  +  ');
 
+  if (job.savedTo) root.querySelector('[data-lead]').textContent = `Saved to ${job.savedTo}.`;
+
+  const note = root.querySelector('[data-note]');
+  note.textContent = job.note || '';
+  note.hidden = !job.note;
+
   const copy = root.querySelector('[data-copy]');
   const paired = filenames.length > 1;
 

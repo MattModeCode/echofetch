@@ -59,8 +59,7 @@ async function ensureOffscreen() {
 async function sendToOffscreen(message, attempts = 20) {
   for (let attempt = 0; attempt < attempts; attempt++) {
     try {
-      await chrome.runtime.sendMessage({ target: 'offscreen', ...message });
-      return;
+      return await chrome.runtime.sendMessage({ target: 'offscreen', ...message });
     } catch {
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
@@ -139,7 +138,7 @@ function saveFile(url, filename, saveAs) {
  * pair them without guessing.
  */
 async function deliver({ files }) {
-  const job = await readJob();
+  let job = await readJob();
   const settings = await getSettings();
   const stem = sanitizeFilename(
     applyTemplate(settings.filenameTemplate, {
@@ -147,19 +146,38 @@ async function deliver({ files }) {
       date: new Date().toISOString().slice(0, 10)
     })
   );
-  // A per-course rule beats the default folder; both are relative to the browser's
-  // download directory, which is as far as chrome.downloads lets an extension reach.
+  // A per-course rule beats the default folder. Both are relative: to the folder
+  // chosen in Settings when there is one, and otherwise to the browser's download
+  // directory, which is as far as chrome.downloads on its own can reach.
   const folder = resolveFolder(job?.title, job?.url, settings);
   const prefix = folder ? `${folder}/` : '';
+  const paths = files.map((file) => `${prefix}${stem}.${file.extension}`);
+
+  // Chrome's own save dialog picks the location itself, so the chosen folder is not
+  // consulted when the user asked to be asked.
+  if (!settings.askEachTime) {
+    const result = await sendToOffscreen({ type: 'writeFiles', paths }).catch(() => null);
+    if (result?.written) {
+      await writeJob({
+        ...job,
+        state: 'complete',
+        filename: result.filenames[0],
+        filenames: result.filenames,
+        savedTo: result.folder
+      });
+      return closeOffscreen();
+    }
+    if (result?.reason === 'no-permission') {
+      job = { ...job, note: 'Chrome has lost access to your folder. Reconnect it in Settings.' };
+    }
+  }
 
   try {
     const filenames = [];
-    for (const file of files) {
+    for (const [index, file] of files.entries()) {
       // Sequential: two concurrent downloads land in an unpredictable order, and the
       // second can inherit a " (1)" suffix that breaks the shared stem.
-      filenames.push(
-        await saveFile(file.blobUrl, `${prefix}${stem}.${file.extension}`, settings.askEachTime)
-      );
+      filenames.push(await saveFile(file.blobUrl, paths[index], settings.askEachTime));
     }
     await writeJob({ ...job, state: 'complete', filename: filenames[0], filenames });
   } catch (error) {

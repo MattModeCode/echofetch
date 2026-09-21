@@ -183,3 +183,43 @@ code {
     display: none;
   }
 }
+
+/* The chosen folder and the buttons that change it sit on one line, with the folder
+   name free to grow and the buttons holding their width. */
+.field > .label {
+  font-weight: 600;
+}
+
+.picked {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.picked > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.picked .ghost {
+  flex: none;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  background: transparent;
+  color: var(--muted);
+  border-color: var(--line);
+}
+
+.picked .ghost:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--text);
+}
+
+.picked .ghost[hidden] {
+  display: none;
+}

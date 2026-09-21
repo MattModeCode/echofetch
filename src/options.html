@@ -54,12 +54,22 @@
       <h2 id="g-where">Where files go</h2>
 
       <div class="field">
-        <label for="downloadFolder">Folder</label>
+        <span class="label">Save to</span>
+        <div class="picked">
+          <span id="rootName">Your Downloads folder</span>
+          <button type="button" class="ghost" id="chooseRoot">Choose folder…</button>
+          <button type="button" class="ghost" id="clearRoot" hidden>Use Downloads</button>
+        </div>
+        <p class="muted" id="rootHint">Pick any folder on your computer. EchoFetch will
+          keep saving there.</p>
+      </div>
+
+      <div class="field">
+        <label for="downloadFolder">Subfolder</label>
         <input type="text" id="downloadFolder" spellcheck="false" placeholder="Lectures">
-        <p class="muted">A folder inside your Downloads folder — for example
-          <code>School/Psych</code>. Chrome does not let an extension save anywhere
-          else, so leading slashes and <code>..</code> are removed. Leave it empty to
-          save straight into Downloads.</p>
+        <p class="muted">Optional, and created for you — for example
+          <code>School/Psych</code>. Leave it empty to save straight into the folder
+          above.</p>
       </div>
 
       <div class="field">
@@ -74,7 +84,7 @@
         <span>
           <span class="check-title">Ask me where to save each time</span>
           <span class="muted">Chrome opens its save dialog instead, and the folder above
-            is ignored.</span>
+            is ignored. Leave this off to save without being asked.</span>
         </span>
       </label>
     </section>

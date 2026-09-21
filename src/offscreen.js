@@ -8,6 +8,7 @@ import {
   containerFor,
   rangeHeader
 } from './hls.js';
+import { readRoot, hasWriteAccess, writeInto } from './folder-handle.js';
 
 const DEFAULT_CONCURRENCY = 6;
 const MAX_ATTEMPTS = 3;
@@ -174,7 +175,8 @@ async function assembleStream({ parsed, mediaUrl }, kind, concurrency, onProgres
   parts.push(...(await runPool(parsed.segments, refreshSegments, onProgress, concurrency)));
 
   const { extension, mime } = containerFor(parsed, kind);
-  return { blobUrl: URL.createObjectURL(new Blob(parts, { type: mime })), extension };
+  const blob = new Blob(parts, { type: mime });
+  return { blob, blobUrl: URL.createObjectURL(blob), extension };
 }
 
 /**
@@ -182,9 +184,14 @@ async function assembleStream({ parsed, mediaUrl }, kind, concurrency, onProgres
  * silent. When the picker passes an audio URL alongside the video one, both are
  * fetched in the same job and delivered as a matched pair.
  */
+// Blobs cannot travel through runtime.sendMessage, so the finished files stay here
+// and the service worker addresses them by index when it asks for a disk write.
+let assembled = [];
+
 async function download({ variantUrl, audioUrl, jobId, kind, concurrency }) {
   cancelled = false;
   keyCache.clear();
+  assembled = [];
 
   const video = await prepareStream(variantUrl);
   const audio = audioUrl ? await prepareStream(audioUrl) : null;
@@ -221,15 +228,46 @@ async function download({ variantUrl, audioUrl, jobId, kind, concurrency }) {
     files.push({ ...companion, role: 'audio' });
   }
 
-  chrome.runtime.sendMessage({ type: 'assembled', jobId, files });
+  assembled = files.map((file) => file.blob);
+  chrome.runtime.sendMessage({
+    type: 'assembled',
+    jobId,
+    files: files.map(({ blobUrl, extension, role }) => ({ blobUrl, extension, role }))
+  });
 }
 
-chrome.runtime.onMessage.addListener((message) => {
+/**
+ * Writes the assembled files into the folder the user chose in Settings. Every way
+ * this can fail — no folder chosen, permission lapsed since the browser restarted, a
+ * read-only disk — is reported rather than thrown, because the caller answers all of
+ * them the same way: fall back to the browser's own download directory.
+ */
+async function writeFiles(paths) {
+  const root = await readRoot();
+  if (!root) return { written: false, reason: 'no-folder' };
+  if (!(await hasWriteAccess(root))) return { written: false, reason: 'no-permission' };
+
+  try {
+    const filenames = [];
+    for (const [index, path] of paths.entries()) {
+      filenames.push(await writeInto(root, path, assembled[index]));
+    }
+    return { written: true, filenames, folder: root.name };
+  } catch (error) {
+    return { written: false, reason: error?.message || 'write-failed' };
+  }
+}
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.target !== 'offscreen') return false;
 
   if (message.type === 'cancel') {
     cancelled = true;
     return false;
+  }
+  if (message.type === 'writeFiles') {
+    writeFiles(message.paths).then(sendResponse);
+    return true;
   }
   if (message.type === 'download') {
     download({

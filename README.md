@@ -80,15 +80,25 @@ Right-click the icon and choose Options, or use the Settings link in the popup.
 - **Download audio with video** (default on) — fetch the companion audio track and
   save it beside the video. Without it a downloaded lecture is silent.
 - **Prefer audio only** — select the audio track by default when one exists.
+- **Save to** — **Choose folder…** opens your computer's own folder picker, and
+  everything afterwards saves straight there. Without it files go to your Downloads
+  folder, which is the only place a Chrome extension can reach on its own.
+- **Subfolder** — an optional path inside whichever folder is in effect, created for
+  you. Per-course rules override it.
 - **Filename** — supports `{title}` and `{date}`.
 - **Parallel segment downloads** (default 6) — lower it if the campus network
   throttles you or transfers keep failing partway.
 
-Settings sync across the Chrome profiles you are signed into.
+Settings sync across the Chrome profiles you are signed into. The chosen folder does
+not: it is a handle to your own disk, so it stays on the computer you picked it on.
+Chrome can also drop its permission to write there — usually after a restart. When
+that happens the download still lands in Downloads, the popup says so, and choosing
+the folder again in Settings reconnects it.
 
 ## Output
 
-Files land in your normal downloads folder.
+Files land in the folder you chose in Settings, or in your normal downloads folder
+when you have not chosen one.
 
 - Audio-only saves as `.m4a`, or `.aac` for non-fragmented streams.
 - Streams packaged as fragmented MP4 save as `.mp4` and play anywhere.

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { splitPath } from '../src/folder-handle.js';
 import { sanitizeFolder, resolveFolder, DEFAULTS } from '../src/settings.js';
 
 test('sanitizeFolder keeps an ordinary relative path', () => {
@@ -73,4 +74,26 @@ test('resolveFolder returns empty when nothing is configured', () => {
 test('resolveFolder sanitizes a rule folder that was stored unsafely', () => {
   const nasty = { ...DEFAULTS, folderRules: [{ match: 'x', matchKind: 'title', folder: '../../tmp' }] };
   assert.equal(resolveFolder('x', '', nasty), 'tmp');
+});
+
+test('splitPath separates the folders from the file name', () => {
+  assert.deepEqual(splitPath('School/Psych/lecture.mp4'), {
+    folders: ['School', 'Psych'],
+    name: 'lecture.mp4'
+  });
+});
+
+test('splitPath handles a bare file name', () => {
+  assert.deepEqual(splitPath('lecture.mp4'), { folders: [], name: 'lecture.mp4' });
+});
+
+test('splitPath drops empty segments rather than creating unnamed folders', () => {
+  assert.deepEqual(splitPath('/School//lecture.mp4'), {
+    folders: ['School'],
+    name: 'lecture.mp4'
+  });
+});
+
+test('splitPath reports no name when there is nothing to write', () => {
+  assert.equal(splitPath('').name, '');
 });
