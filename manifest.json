@@ -1,14 +1,16 @@
 {
   "manifest_version": 3,
   "name": "EchoFetch",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Download Echo360 lectures for offline viewing using your existing session.",
   "permissions": [
     "webRequest",
     "storage",
     "downloads",
     "offscreen",
-    "tabs"
+    "tabs",
+    "alarms",
+    "notifications"
   ],
   "host_permissions": [
     "*://*.echo360.org/*",

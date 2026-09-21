@@ -81,6 +81,60 @@ are still silent because their audio was never downloaded. For those, take the
 
 Turn the fetching off under Options if you only ever want the picture.
 
+## Watching courses
+
+EchoFetch can watch a course and download each new lecture on its own — the video and
+the transcript together, into a folder you give that course. It runs while Chrome is
+open. Nothing has to be playing, no page has to be loaded, and nothing is reloaded: it
+asks Echo360's own course listing what exists, the same request the course page makes.
+
+Set one up either way:
+
+- Open the course in Echo360 and click the EchoFetch icon. On a course page the popup
+  offers **Watch this course** instead of a picker.
+- Or open Settings and press **Find my courses**, which reads the courses you are
+  enrolled in and offers each one.
+
+Each watched course gets its own row in Settings: a folder, a size, how often to check,
+and whether to take the transcript. Anything left at the default follows the global
+setting above it, so changing the default size later moves every course that never
+overrode it.
+
+A lecture arrives as one set of files sharing one name:
+
+```
+School/SOCPSY/SOCPSY 1Z03 Conformity.mp4     video and audio, one file
+School/SOCPSY/SOCPSY 1Z03 Conformity.vtt     transcript, timestamps kept
+School/SOCPSY/SOCPSY 1Z03 Conformity.txt     transcript, plain text
+```
+
+### What it does about the awkward cases
+
+- **A lecture still processing** is not a failure. It is checked again later and costs
+  nothing in the meantime.
+- **A lecture that fails** is retried three times, with a growing gap, and then left
+  alone with the reason on its row. Asking forever does not fix a lecture that is not
+  there.
+- **Echo360 signing you out** stops the checking, says so in a notification and on the
+  course's row, and resumes as soon as you sign in and press **Check again now**.
+- **A course that fails five times running** pauses itself rather than hammering your
+  institution's server, and says why.
+- **One lecture at a time**, and never at the same time as a download you started
+  yourself.
+
+### The limits worth knowing before you rely on it
+
+- **Chrome has to be open.** An extension cannot run when the browser is not. Lectures
+  published overnight arrive when you next open it, not before.
+- **Checks are no more often than every 15 minutes**, jittered. This is your own
+  session against your own institution, and it should look like a person reading their
+  course page.
+- **The chosen folder can be lost.** Chrome drops its permission to write there, often
+  after a restart, and an automatic download cannot ask you to reconnect it. When that
+  happens the lecture still lands — in your Downloads folder, under the same subfolder
+  — and Settings says the folder needs reconnecting.
+- Everything under **Limits** below still applies, DRM especially.
+
 ## Transcript
 
 Echo360 writes a transcript for most lectures. EchoFetch downloads that transcript —
@@ -193,7 +247,8 @@ It is not fast; run a batch overnight.
   Widevine or PlayReady, EchoFetch detects it and says so instead of writing a
   broken file. No extension can decrypt those streams.
 - Standard AES-128 HLS encryption is not DRM and is handled normally.
-- One lecture at a time. There is no bulk or whole-course download.
+- One lecture at a time. Watched courses queue them and take them in turn; there is
+  still no bulk download of a course's back catalogue on demand.
 - Live lectures are not supported; the recording must have finished processing.
 - The lecture is assembled in memory before it is written to disk, so a very long
   recording at high bitrate — past roughly 2 GB — can exhaust the tab's memory.
@@ -209,6 +264,15 @@ The transcript is found the same way: the request the player's own transcript pa
 makes is recorded per tab, and the popup fetches that URL when a transcript row is
 chosen. Whatever comes back — WebVTT, SubRip, or the player's JSON cue list — is
 parsed into cues and written out as `.vtt` or `.txt`.
+
+A watched course works the other way round. An alarm wakes the service worker every few
+minutes; each course whose own interval has come round is read from
+`/section/{id}/syllabus`, and anything new goes into a ledger in `chrome.storage.local`
+keyed by lesson and media id, which is what makes a lecture download exactly once
+however many times it is seen again. Where Echo360 will not hand over the media URLs
+directly, the watcher opens the lesson page in a background tab, lets the same sniffer
+record what the player asks for, and closes it. `docs/WATCHER.md` records which
+endpoints those are and how much of it has been verified.
 
 The download itself runs in an **offscreen document**, not the service worker.
 This matters: MV3 shuts a service worker down after roughly 30 seconds idle, which

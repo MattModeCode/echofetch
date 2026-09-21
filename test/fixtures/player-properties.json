@@ -1,0 +1,34 @@
+{
+  "status": "ok",
+  "data": {
+    "media": {
+      "media": {
+        "current": {
+          "primaryFiles": [
+            {
+              "width": 1920,
+              "height": 1080,
+              "s3Url": "https://cdn.echo360.ca/0/fhd1.m3u8?token=abc"
+            },
+            {
+              "width": 1280,
+              "height": 720,
+              "s3Url": "https://cdn.echo360.ca/0/hd1.m3u8?token=abc"
+            },
+            {
+              "width": 640,
+              "height": 360,
+              "s3Url": "https://cdn.echo360.ca/0/sd1.m3u8?token=abc"
+            }
+          ],
+          "audioFiles": [
+            {
+              "s3Url": "https://cdn.echo360.ca/0/audio.m3u8?token=abc"
+            }
+          ],
+          "thumbnail": "https://cdn.echo360.ca/0/poster.jpg"
+        }
+      }
+    }
+  }
+}

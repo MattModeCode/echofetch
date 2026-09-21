@@ -5,7 +5,9 @@
 // would kill a lecture-length transfer partway through; the offscreen document is
 // the only place a long-running fetch loop survives.
 
-import { getSettings, applyTemplate, resolveFolder } from './settings.js';
+import { getSettings, applyTemplate, resolveFolder, saveSettings } from './settings.js';
+import { readCourses, removeCourse, upsertCourse } from './watchlist.js';
+import * as watcher from './watcher.js';
 
 const OFFSCREEN_PATH = 'src/offscreen.html';
 const PLAYLIST_PATTERN = /\.m3u8(\?|$)/i;
@@ -96,10 +98,14 @@ async function startDownload({
   variantUrl,
   audioUrl = null,
   transcriptUrl = null,
+  transcriptFormats = null,
   format = null,
   title,
   pageUrl = '',
-  kind = 'video'
+  kind = 'video',
+  ledgerKey = null,
+  folder = null,
+  concurrency = null
 }) {
   const job = {
     id: `job-${Date.now()}`,
@@ -108,6 +114,10 @@ async function startDownload({
     // lecture title from week to week.
     url: pageUrl,
     kind,
+    // Set when the watcher started this job: the ledger entry it has to settle, and
+    // the folder its course was given, which beats the ordinary rules.
+    ledgerKey,
+    folder,
     withAudio: Boolean(audioUrl),
     done: 0,
     total: 0,
@@ -117,21 +127,23 @@ async function startDownload({
   };
   await writeJob(job);
   try {
-    const { concurrency } = await getSettings();
+    const settings = await getSettings();
     await ensureOffscreen();
     await sendToOffscreen({
       type: 'download',
       variantUrl,
       audioUrl,
       transcriptUrl,
+      transcriptFormats,
       format,
       jobId: job.id,
       kind,
-      concurrency
+      concurrency: concurrency || settings.concurrency
     });
   } catch (error) {
     await writeJob({ ...job, state: 'error', error: error.message });
     await closeOffscreen();
+    if (ledgerKey) await watcher.settle(ledgerKey, { ok: false, error });
   }
 }
 
@@ -173,7 +185,7 @@ async function deliver({ files }) {
   // A per-course rule beats the default folder. Both are relative: to the folder
   // chosen in Settings when there is one, and otherwise to the browser's download
   // directory, which is as far as chrome.downloads on its own can reach.
-  const folder = resolveFolder(job?.title, job?.url, settings);
+  const folder = job?.folder ?? resolveFolder(job?.title, job?.url, settings);
   const prefix = folder ? `${folder}/` : '';
   const paths = files.map((file) => `${prefix}${stem}.${file.extension}`);
 
@@ -189,6 +201,13 @@ async function deliver({ files }) {
         filenames: result.filenames,
         savedTo: result.folder
       });
+      if (job?.ledgerKey) {
+        await watcher.settle(job.ledgerKey, {
+          ok: true,
+          filenames: result.filenames,
+          savedTo: result.folder
+        });
+      }
       return closeOffscreen();
     }
     if (result?.reason === 'no-permission') {
@@ -204,8 +223,10 @@ async function deliver({ files }) {
       filenames.push(await saveFile(file.blobUrl, paths[index], settings.askEachTime));
     }
     await writeJob({ ...job, state: 'complete', filename: filenames[0], filenames });
+    if (job?.ledgerKey) await watcher.settle(job.ledgerKey, { ok: true, filenames });
   } catch (error) {
     await writeJob({ ...job, state: 'error', error: error.message });
+    if (job?.ledgerKey) await watcher.settle(job.ledgerKey, { ok: false, error });
   } finally {
     // Closing the document revokes its blob URLs, so an explicit revoke is redundant.
     await closeOffscreen();
@@ -247,7 +268,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     case 'failed': {
       readJob()
-        .then((job) => writeJob({ ...job, state: 'error', error: message.error }))
+        .then(async (job) => {
+          await writeJob({ ...job, state: 'error', error: message.error });
+          if (job?.ledgerKey) {
+            await watcher.settle(job.ledgerKey, { ok: false, error: new Error(message.error) });
+          }
+        })
         .then(closeOffscreen);
       return false;
     }
@@ -262,3 +288,96 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return false;
   }
 });
+
+// --- The watcher -----------------------------------------------------------------
+//
+// Everything below runs with no popup open and no lecture page loaded. The alarm is
+// the only clock: MV3 gives the service worker no other way to wake up, and the
+// per-course schedule inside the tick decides who is actually due.
+
+const getCaptured = async (tabId) => {
+  const forTab = captured.get(tabId);
+  return forTab ? [...forTab.values()] : [];
+};
+
+const runTick = () => watcher.tick({ startDownload, getCaptured });
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === watcher.ALARM) runTick();
+});
+
+// A browser restart is both when the alarm has to be re-armed and when a download
+// interrupted by the shutdown has to be put back in the queue.
+chrome.runtime.onStartup.addListener(async () => {
+  await watcher.ensureAlarm();
+  await watcher.recover();
+  await runTick();
+});
+
+chrome.runtime.onInstalled.addListener(async () => {
+  await watcher.ensureAlarm();
+  await watcher.recover();
+});
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.target === 'offscreen') return false;
+
+  switch (message.type) {
+    case 'watchCourse': {
+      (async () => {
+        const settings = await getSettings();
+        const courses = upsertCourse(readCourses(settings.courses), message.course);
+        await saveSettings({ courses });
+        await watcher.ensureAlarm();
+        await watcher.watchNow(message.course.sectionId);
+        runTick();
+        sendResponse({ courses });
+      })();
+      return true;
+    }
+    case 'unwatchCourse': {
+      (async () => {
+        const settings = await getSettings();
+        const courses = removeCourse(readCourses(settings.courses), message.sectionId);
+        await saveSettings({ courses });
+        sendResponse({ courses });
+      })();
+      return true;
+    }
+    case 'getWatchState': {
+      (async () => {
+        const [{ ledger, states }, settings] = await Promise.all([
+          watcher.readState(),
+          getSettings()
+        ]);
+        sendResponse({ ledger, states, courses: readCourses(settings.courses) });
+      })();
+      return true;
+    }
+    case 'resumeCourse': {
+      watcher.resume(message.sectionId).then(() => {
+        runTick();
+        sendResponse({ ok: true });
+      });
+      return true;
+    }
+    case 'forgetLecture': {
+      watcher.forgetLecture(message.key).then(() => sendResponse({ ok: true }));
+      return true;
+    }
+    case 'checkNow': {
+      (async () => {
+        await watcher.watchNow(message.sectionId);
+        const result = await runTick();
+        sendResponse({ ok: true, ...result });
+      })();
+      return true;
+    }
+    default:
+      return false;
+  }
+});
+
+// The worker may also be woken by a message or a request rather than the alarm; arming
+// it here means a fresh install starts watching without waiting for a restart.
+watcher.ensureAlarm();

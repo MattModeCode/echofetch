@@ -234,31 +234,38 @@ function combine(video, audio) {
 
 /**
  * The transcript Echo360 already holds. No playlist, no segments, no transcription —
- * one request, reshaped into the format the picker asked for.
+ * one request, reshaped into every format that was asked for.
  */
-async function downloadTranscript({ transcriptUrl, format, jobId }) {
+async function transcriptFiles(url, formats) {
+  const raw = await fetchWithSession(url, { asText: true });
+  return formats.map((format) => {
+    const { extension, mime } = TRANSCRIPT_FORMATS[format] || TRANSCRIPT_FORMATS.vtt;
+    const blob = new Blob([renderTranscript(raw, format)], { type: mime });
+    return { blob, blobUrl: URL.createObjectURL(blob), extension, role: 'transcript' };
+  });
+}
+
+async function downloadTranscript({ transcriptUrl, format, formats, jobId }) {
   cancelled = false;
   assembled = [];
   chrome.runtime.sendMessage({ type: 'progress', jobId, patch: { done: 0, total: 1, bytes: 0 } });
 
-  const raw = await fetchWithSession(transcriptUrl, { asText: true });
-  const { extension, mime } = TRANSCRIPT_FORMATS[format] || TRANSCRIPT_FORMATS.vtt;
-  const blob = new Blob([renderTranscript(raw, format)], { type: mime });
+  const files = await transcriptFiles(transcriptUrl, formats?.length ? formats : [format || 'vtt']);
 
-  assembled = [blob];
+  assembled = files.map((file) => file.blob);
   chrome.runtime.sendMessage({
     type: 'progress',
     jobId,
-    patch: { done: 1, total: 1, bytes: blob.size }
+    patch: { done: 1, total: 1, bytes: assembled.reduce((sum, blob) => sum + blob.size, 0) }
   });
   chrome.runtime.sendMessage({
     type: 'assembled',
     jobId,
-    files: [{ blobUrl: URL.createObjectURL(blob), extension, role: 'transcript' }]
+    files: files.map(({ blobUrl, extension, role }) => ({ blobUrl, extension, role }))
   });
 }
 
-async function download({ variantUrl, audioUrl, jobId, kind, concurrency }) {
+async function download({ variantUrl, audioUrl, transcriptUrl, transcriptFormats, jobId, kind, concurrency }) {
   cancelled = false;
   keyCache.clear();
   assembled = [];
@@ -297,6 +304,18 @@ async function download({ variantUrl, audioUrl, jobId, kind, concurrency }) {
   }
 
   const files = companion ? combine(primary, companion) : [toFile(primary, kind)];
+
+  // The watcher asks for the transcript in the same job, so the lecture and its words
+  // land together under one name. A lecture with no transcript is not a failed
+  // download — the video is already assembled and is written either way.
+  if (transcriptUrl && transcriptFormats?.length) {
+    try {
+      files.push(...(await transcriptFiles(transcriptUrl, transcriptFormats)));
+    } catch (error) {
+      console.warn('EchoFetch: no transcript for this lecture.', error);
+    }
+  }
+
   assembled = files.map((file) => file.blob);
   chrome.runtime.sendMessage({
     type: 'assembled',
@@ -349,6 +368,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         : download({
             variantUrl: message.variantUrl,
             audioUrl: message.audioUrl || null,
+            transcriptUrl: message.transcriptUrl || null,
+            transcriptFormats: message.transcriptFormats || null,
             jobId: message.jobId,
             kind: message.kind || 'video',
             concurrency: message.concurrency || DEFAULT_CONCURRENCY

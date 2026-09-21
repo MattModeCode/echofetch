@@ -101,6 +101,48 @@
       <button type="button" class="ghost add" id="add-rule">Add a rule</button>
     </section>
 
+    <section class="group" aria-labelledby="g-watch">
+      <h2 id="g-watch">Watched courses</h2>
+      <p class="muted">EchoFetch checks these while Chrome is open and downloads each new
+        lecture as it appears — the video and the transcript together, into the folder you
+        give the course. Nothing has to be open and no page is reloaded.</p>
+
+      <div class="picked">
+        <button type="button" class="ghost" id="findCourses">Find my courses</button>
+        <span class="muted" id="findHint">Reads the courses you are enrolled in from
+          Echo360.</span>
+      </div>
+
+      <ul class="courses" id="courses" role="list"></ul>
+      <p class="muted empty" id="courses-empty">No courses watched yet.</p>
+
+      <div class="field">
+        <label for="courseUrl">Or paste a course address</label>
+        <div class="picked">
+          <input type="text" id="courseUrl" spellcheck="false"
+            placeholder="https://echo360.ca/section/…/home" aria-label="Course address">
+          <button type="button" class="ghost" id="addCourse">Watch</button>
+        </div>
+        <p class="muted" id="addHint">Open the course in Echo360 and copy the address from
+          the bar.</p>
+      </div>
+
+      <label class="check">
+        <input type="checkbox" id="notifyOnDownload">
+        <span>
+          <span class="check-title">Tell me when a lecture arrives</span>
+          <span class="muted">A notification per finished lecture, and one when Echo360
+            signs you out and checking stops.</span>
+        </span>
+      </label>
+    </section>
+
+    <section class="group" aria-labelledby="g-activity">
+      <h2 id="g-activity">Recent activity</h2>
+      <ul class="activity" id="activity" role="list"></ul>
+      <p class="muted empty" id="activity-empty">Nothing downloaded automatically yet.</p>
+    </section>
+
     <section class="group" aria-labelledby="g-network">
       <h2 id="g-network">Network</h2>
 
@@ -123,6 +165,61 @@
       <span class="arrow" aria-hidden="true">→</span>
       <input type="text" class="rule-folder" spellcheck="false" placeholder="School/Psych" aria-label="Folder">
       <button type="button" class="remove" aria-label="Remove this rule">Remove</button>
+    </li>
+  </template>
+
+  <template id="tpl-course">
+    <li class="course">
+      <div class="course-head">
+        <span class="course-name" data-label></span>
+        <label class="course-enabled">
+          <input type="checkbox" class="course-toggle">
+          <span>On</span>
+        </label>
+        <button type="button" class="remove" data-remove aria-label="Stop watching this course">Remove</button>
+      </div>
+      <div class="course-fields">
+        <label class="sr-only" data-folder-label>Folder</label>
+        <input type="text" class="course-folder" spellcheck="false" placeholder="School/SOCPSY" aria-label="Folder for this course">
+        <select class="course-quality" aria-label="Size for this course">
+          <option value="">Default size</option>
+          <option value="360">360p</option>
+          <option value="480">480p</option>
+          <option value="720">720p</option>
+          <option value="1080">1080p</option>
+          <option value="9999">Largest</option>
+        </select>
+        <select class="course-poll" aria-label="How often to check">
+          <option value="15">Every 15 min</option>
+          <option value="30">Every 30 min</option>
+          <option value="60">Hourly</option>
+          <option value="180">Every 3 hours</option>
+          <option value="720">Twice a day</option>
+        </select>
+      </div>
+      <label class="check course-check">
+        <input type="checkbox" class="course-transcript">
+        <span><span class="check-title">Transcript too</span></span>
+      </label>
+      <p class="muted course-status" data-status></p>
+      <button type="button" class="ghost" data-resume hidden>Check again now</button>
+    </li>
+  </template>
+
+  <template id="tpl-found">
+    <li class="course found">
+      <div class="course-head">
+        <span class="course-name" data-label></span>
+        <button type="button" class="ghost" data-watch>Watch</button>
+      </div>
+    </li>
+  </template>
+
+  <template id="tpl-activity">
+    <li class="activity-row">
+      <span class="activity-title" data-title></span>
+      <span class="muted" data-detail></span>
+      <button type="button" class="remove" data-forget hidden>Download again</button>
     </li>
   </template>
 

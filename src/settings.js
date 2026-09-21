@@ -15,7 +15,11 @@ export const DEFAULTS = {
   downloadFolder: '',
   askEachTime: false,
   // [{ match, matchKind: 'title' | 'url', folder }] — first match wins.
-  folderRules: []
+  folderRules: [],
+  // Watched courses: see watchlist.js for the shape. Small enough to sync; the ledger
+  // of what has been downloaded is far too big for it and lives in storage.local.
+  courses: [],
+  notifyOnDownload: true
 };
 
 const ILLEGAL = /[<>:"|?*\u0000-\u001f]/g;
