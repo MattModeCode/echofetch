@@ -1,18 +1,7 @@
-import {
-  isMasterPlaylist,
-  parseMaster,
-  parseMedia,
-  audioRenditions,
-  audioForVariant,
-  aspectLabel,
-  guessFeed,
-  formatSize,
-  formatDuration
-} from './hls.js';
+import { formatSize, formatDuration } from './hls.js';
+import { buildOptions, cleanTitle, pickDefault, ECHO_HOST } from './streams.js';
+import { parseSectionId } from './watchlist.js';
 import { getSettings } from './settings.js';
-
-const ECHO_HOST = /(^|\.)echo360\.(org|ca|net\.au|org\.au|org\.uk)$/i;
-const ASSUMED_AUDIO_BITRATE = 128_000;
 
 const view = document.getElementById('view');
 const send = (message) => chrome.runtime.sendMessage(message);
@@ -20,98 +9,6 @@ const send = (message) => chrome.runtime.sendMessage(message);
 function show(templateId) {
   view.replaceChildren(document.getElementById(templateId).content.cloneNode(true));
   return view;
-}
-
-const fetchText = (url) =>
-  fetch(url, { credentials: 'include', cache: 'no-store' }).then((r) => {
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    return r.text();
-  });
-
-function cleanTitle(raw) {
-  return (raw || 'Lecture').replace(/\s*[|–-]\s*Echo\s*360.*$/i, '').trim() || 'Lecture';
-}
-
-/**
- * Duration is identical across a master's variants, so probe one media playlist per
- * master rather than one per variant — the difference is eight fetches versus two.
- */
-async function probeDuration(variantUrl) {
-  try {
-    return parseMedia(await fetchText(variantUrl), variantUrl).totalDuration;
-  } catch {
-    return 0;
-  }
-}
-
-async function buildOptions(playlists) {
-  const video = [];
-  const audio = [];
-  let duration = 0;
-
-  for (const [index, entry] of playlists.entries()) {
-    let text;
-    try {
-      text = await fetchText(entry.url);
-    } catch {
-      continue;
-    }
-
-    const source = playlists.length > 1 ? `Stream ${index + 1}` : 'Lecture';
-
-    if (!isMasterPlaylist(text)) {
-      video.push({ kind: 'video', url: entry.url, label: source, sub: 'single quality', height: 0 });
-      continue;
-    }
-
-    const { variants, audioGroups } = parseMaster(text, entry.url);
-    if (!variants.length) continue;
-
-    if (!duration) duration = await probeDuration(variants[0].url);
-
-    for (const variant of variants) {
-      const aspect = aspectLabel(variant.resolution);
-      const companion = audioForVariant(variant, audioGroups);
-      const videoBytes = duration && variant.bandwidth ? (variant.bandwidth / 8) * duration : 0;
-      video.push({
-        kind: 'video',
-        url: variant.url,
-        audioUrl: companion ? companion.url : null,
-        source,
-        height: variant.height || 0,
-        aspect,
-        label: variant.height ? `${variant.height}p${aspect ? ` · ${aspect}` : ''}` : source,
-        bytes: videoBytes + (companion && duration ? (ASSUMED_AUDIO_BITRATE / 8) * duration : 0)
-      });
-    }
-
-    for (const rendition of audioRenditions(audioGroups)) {
-      audio.push({
-        kind: 'audio',
-        url: rendition.url,
-        label: 'Audio only',
-        sub: `${rendition.name} · separate track`,
-        height: 0,
-        bytes: duration ? (ASSUMED_AUDIO_BITRATE / 8) * duration : 0,
-        estimated: true
-      });
-    }
-  }
-
-  for (const option of video) {
-    const feed = guessFeed(option, video);
-    const sound = option.audioUrl ? 'with audio' : 'no audio track published';
-    option.sub = [option.source, feed, sound].filter(Boolean).join(' — ');
-  }
-
-  return { video, audio, duration };
-}
-
-function pickDefault({ video, audio }, settings) {
-  if (settings.audioOnlyDefault && audio.length) return audio[0];
-  const withinCap = video.filter((o) => o.height && o.height <= settings.maxHeight);
-  const pool = withinCap.length ? withinCap : video;
-  return pool.reduce((a, b) => ((b.height || 0) > (a.height || 0) ? b : a), pool[0]);
 }
 
 function buildRow(option, index, isDefault) {
@@ -138,23 +35,25 @@ function buildRow(option, index, isDefault) {
 
   const size = document.createElement('span');
   size.className = 'size';
-  const formatted = formatSize(option.bytes);
-  size.textContent = formatted ? `${option.estimated ? '~' : ''}${formatted}` : '';
+  size.textContent = formatSize(option.bytes) || '';
 
   label.append(input, stack, size);
   li.append(label);
   return li;
 }
 
-function renderPicker(title, groups, settings) {
-  const options = [...groups.video, ...groups.audio];
+function renderPicker(title, pageUrl, groups, settings) {
+  const options = [...groups.video, ...groups.audio, ...groups.transcript];
   const root = show('tpl-picker');
-  const preselected = pickDefault(groups, settings);
+  const preselected = pickDefault(groups, {
+    maxHeight: settings.maxHeight,
+    audioOnly: settings.audioOnlyDefault
+  });
 
   root.querySelector('[data-title]').textContent = title;
   root.querySelector('[data-meta]').textContent = [
     formatDuration(groups.duration),
-    groups.video.length > 1 ? `${groups.video.length} qualities` : null
+    options.length > 1 ? 'Pick a size' : null
   ]
     .filter(Boolean)
     .join(' · ');
@@ -163,17 +62,27 @@ function renderPicker(title, groups, settings) {
   options.forEach((option, index) => list.append(buildRow(option, index, option === preselected)));
 
   const note = root.querySelector('[data-note]');
-  note.textContent = groups.audio.length
-    ? ''
-    : 'No separate audio track is published for this lecture. For audio only, take the smallest video and strip the picture with the ffmpeg command offered after the download.';
+  const notes = [];
+  if (groups.silentOnly) {
+    notes.push('This lecture was published without sound, so these downloads have no audio.');
+  } else if (!groups.audio.length) {
+    notes.push('This lecture has no audio-only version. Take the smallest size instead.');
+  }
+  if (!groups.transcript.length) {
+    notes.push(
+      'No transcript found yet. Open the transcript panel on the lecture page, then reopen this popup.'
+    );
+  }
+  note.textContent = notes.join(' ');
 
   root.querySelector('[data-start]').addEventListener('click', async (event) => {
     const chosen = options[Number(view.querySelector('input[name=stream]:checked').value)];
-    const audioUrl = settings.includeAudio ? chosen.audioUrl || null : null;
+    const isTranscript = chosen.kind === 'transcript';
+    const audioUrl = !isTranscript && settings.includeAudio ? chosen.audioUrl || null : null;
     const host = new URL(chosen.url).host;
 
-    // The audio rendition can sit on a different origin, and both must be granted
-    // before the job starts or the second stream fails halfway through.
+    // The audio rendition and the transcript can each sit on a different origin, and
+    // every one must be granted before the job starts or a fetch fails halfway through.
     const origins = [
       ...new Set(
         [chosen.url, audioUrl].filter(Boolean).map((url) => `${new URL(url).origin}/*`)
@@ -190,9 +99,12 @@ function renderPicker(title, groups, settings) {
     event.target.disabled = true;
     await send({
       type: 'startDownload',
-      variantUrl: chosen.url,
+      variantUrl: isTranscript ? null : chosen.url,
+      transcriptUrl: isTranscript ? chosen.url : null,
+      format: chosen.format || null,
       audioUrl,
       title,
+      pageUrl,
       kind: chosen.kind
     });
     renderJob({ title, done: 0, total: 0, bytes: 0, state: 'starting' });
@@ -213,6 +125,12 @@ function renderDone(job) {
   const filenames = job.filenames?.length ? job.filenames : [job.filename].filter(Boolean);
   root.querySelector('[data-filename]').textContent = filenames.join('  +  ');
 
+  if (job.savedTo) root.querySelector('[data-lead]').textContent = `Saved to ${job.savedTo}.`;
+
+  const note = root.querySelector('[data-note]');
+  note.textContent = job.note || '';
+  note.hidden = !job.note;
+
   const copy = root.querySelector('[data-copy]');
   const paired = filenames.length > 1;
 
@@ -224,7 +142,7 @@ function renderDone(job) {
       await navigator.clipboard.writeText(mergeCommand(filenames));
       copy.textContent = 'Copied';
     });
-  } else if (job.kind === 'audio' || !filenames.length) {
+  } else if (job.kind === 'audio' || job.kind === 'transcript' || !filenames.length) {
     copy.remove();
   } else {
     copy.addEventListener('click', async () => {
@@ -243,10 +161,10 @@ function renderJob(job) {
 
   const root = show('tpl-progress');
   root.querySelector('[data-title]').textContent = job.title;
-  const ratio = job.total ? job.done / job.total : 0;
+  const ratio = job.total ? Math.min(1, Math.max(0, job.done / job.total)) : 0;
   root.querySelector('[data-fill]').style.transform = `scaleX(${ratio})`;
   root.querySelector('[data-detail]').textContent = job.total
-    ? `${job.done} / ${job.total} segments · ${formatSize(job.bytes) || '0 MB'}`
+    ? `${Math.floor(ratio * 100)}%`
     : 'Reading the playlist…';
   root.querySelector('[data-cancel]').addEventListener('click', () => send({ type: 'cancel' }));
 }
@@ -257,6 +175,54 @@ function renderError(message) {
   root.querySelector('[data-again]').addEventListener('click', start);
 }
 
+/**
+ * A course page has no lecture to download, so the popup offers the thing that page is
+ * actually for: watching the course from now on.
+ */
+async function renderCourse(tab, section) {
+  const root = show('tpl-course');
+  const { courses = [], states = {} } = (await send({ type: 'getWatchState' })) || {};
+  const watched = courses.find((course) => course.sectionId === section.sectionId);
+
+  const button = root.querySelector('[data-watch]');
+  const status = root.querySelector('[data-status]');
+
+  if (watched) {
+    root.querySelector('[data-lead]').textContent = 'Watching this course.';
+    button.textContent = 'Check for new lectures now';
+    const state = states[section.sectionId];
+    status.textContent = state?.paused
+      ? `Checking stopped: ${state.lastError || 'too many failures'}.`
+      : 'New lectures download on their own while Chrome is open.';
+  }
+
+  button.addEventListener('click', async () => {
+    // Must be the first await or Chrome stops counting this as a user gesture. An
+    // unattended download cannot ask for a host it has never seen, and Echo360 serves
+    // media from CDN domains that are not knowable ahead of time, so the permission has
+    // to be granted now or the first automatic download fails halfway through.
+    const granted = await chrome.permissions.request({ origins: ['*://*/*'] });
+    if (!granted && !watched) {
+      status.textContent =
+        'Without permission to read the media hosts, automatic downloads will fail. ' +
+        'Press Watch again to grant it.';
+      return;
+    }
+
+    button.disabled = true;
+    await send(
+      watched
+        ? { type: 'checkNow', sectionId: section.sectionId }
+        : { type: 'watchCourse', course: { ...section, label: cleanTitle(tab.title) } }
+    );
+    status.textContent = 'Checking now. Anything new will download in the background.';
+  });
+
+  root.querySelector('[data-settings]').addEventListener('click', () => {
+    chrome.runtime.openOptionsPage();
+  });
+}
+
 async function start() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.url || !ECHO_HOST.test(new URL(tab.url).hostname)) return show('tpl-offsite');
@@ -264,8 +230,14 @@ async function start() {
   const { job } = await send({ type: 'getJob' });
   if (job && ['starting', 'running'].includes(job.state)) return renderJob(job);
 
-  const { playlists } = await send({ type: 'getPlaylists', tabId: tab.id });
-  if (!playlists.length) {
+  const section = parseSectionId(tab.url);
+  const { playlists: seen } = await send({ type: 'getPlaylists', tabId: tab.id });
+  // A lecture that is already playing wins: the section id is in the URL on the
+  // classroom page too, and the picker is what the user came for there.
+  if (section && !seen.length) return renderCourse(tab, section);
+
+  const { playlists, transcripts } = await send({ type: 'getPlaylists', tabId: tab.id });
+  if (!playlists.length && !transcripts.length) {
     const root = show('tpl-waiting');
     root.querySelector('[data-widen]').addEventListener('click', async () => {
       // webRequest only reports URLs the extension holds host permission for, so a
@@ -278,12 +250,15 @@ async function start() {
     return root;
   }
 
-  const [groups, settings] = await Promise.all([buildOptions(playlists), getSettings()]);
-  if (!groups.video.length && !groups.audio.length) {
+  const [groups, settings] = await Promise.all([
+    buildOptions(playlists, transcripts),
+    getSettings()
+  ]);
+  if (!groups.video.length && !groups.audio.length && !groups.transcript.length) {
     return renderError('Found a playlist but could not read it. Try replaying the lecture.');
   }
 
-  renderPicker(cleanTitle(tab.title), groups, settings);
+  renderPicker(cleanTitle(tab.title), tab.url, groups, settings);
 }
 
 document.getElementById('open-options').addEventListener('click', (event) => {

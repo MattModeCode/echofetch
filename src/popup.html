@@ -25,6 +25,17 @@
     </section>
   </template>
 
+  <template id="tpl-course">
+    <section class="state">
+      <p class="lead" data-lead>This is a course page.</p>
+      <p class="muted">EchoFetch can watch it and download each new lecture — video and
+        transcript — as it is published, while Chrome is open.</p>
+      <button class="primary" data-watch>Watch this course</button>
+      <p class="muted" data-status></p>
+      <button class="ghost" data-settings>Choose its folder and size</button>
+    </section>
+  </template>
+
   <template id="tpl-waiting">
     <section class="state">
       <p class="lead">No stream detected yet.</p>
@@ -57,8 +68,9 @@
 
   <template id="tpl-done">
     <section class="state">
-      <p class="lead ok">Saved.</p>
+      <p class="lead ok" data-lead>Saved.</p>
       <p class="muted" data-filename></p>
+      <p class="muted bad" data-note hidden></p>
       <button class="ghost" data-copy>Copy ffmpeg command to shrink it</button>
       <button class="ghost" data-again>Download another</button>
     </section>

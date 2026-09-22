@@ -10,58 +10,218 @@
   <header class="bar">
     <span class="mark" aria-hidden="true"></span>
     <h1>EchoFetch settings</h1>
+    <p class="saved" id="saved" role="status" hidden>Saved</p>
   </header>
 
   <main class="form">
-    <div class="field">
-      <label for="maxHeight">Default quality</label>
-      <select id="maxHeight">
-        <option value="360">360p — smallest</option>
-        <option value="480">480p</option>
-        <option value="720">720p — recommended</option>
-        <option value="1080">1080p</option>
-        <option value="9999">Highest available</option>
-      </select>
-      <p class="muted">Pre-selects the largest stream at or below this height. Slides
-        stay readable at 720p, and capping here is what keeps files off 8 GB — nothing
-        afterwards can undo having fetched the 1080p variant.</p>
-    </div>
+    <section class="group" aria-labelledby="g-quality">
+      <h2 id="g-quality">Quality</h2>
 
-    <div class="field">
-      <label class="inline">
-        <input type="checkbox" id="includeAudio">
-        <span>Download audio with video</span>
-      </label>
-      <p class="muted">Echo360 publishes audio separately, so a video on its own is
-        silent. This saves the audio beside it as a second file, and the finished
-        screen offers the one-line ffmpeg command that merges them.</p>
-    </div>
+      <div class="field">
+        <label for="maxHeight">Preferred size</label>
+        <select id="maxHeight">
+          <option value="360">360p — smallest</option>
+          <option value="480">480p</option>
+          <option value="720">720p — recommended</option>
+          <option value="1080">1080p</option>
+          <option value="9999">Largest available</option>
+        </select>
+        <p class="muted">Slides stay readable at 720p. Choosing here is what keeps a
+          lecture off several gigabytes — nothing afterwards can undo downloading the
+          bigger one.</p>
+      </div>
 
-    <div class="field">
-      <label class="inline">
+      <label class="check">
         <input type="checkbox" id="audioOnlyDefault">
-        <span>Prefer audio only</span>
+        <span>
+          <span class="check-title">Prefer audio only</span>
+          <span class="muted">Roughly 60 MB an hour instead of several gigabytes, when
+            the lecture offers it.</span>
+        </span>
       </label>
-      <p class="muted">When a lecture publishes a separate audio track, select it by
-        default. Roughly 60 MB an hour instead of several GB.</p>
-    </div>
 
-    <div class="field">
-      <label for="filenameTemplate">Filename</label>
-      <input type="text" id="filenameTemplate" spellcheck="false">
-      <p class="muted">Tokens: <code>{title}</code>, <code>{date}</code>. The extension
-        is added automatically.</p>
-    </div>
+      <label class="check">
+        <input type="checkbox" id="includeAudio">
+        <span>
+          <span class="check-title">Include the sound in the video file</span>
+          <span class="muted">Echo360 publishes sound separately, so this fetches it too and
+            writes one MP4 with both. Streams that cannot be combined save as a pair
+            instead, and the finished screen offers a command that merges them.</span>
+        </span>
+      </label>
+    </section>
 
-    <div class="field">
-      <label for="concurrency">Parallel segment downloads</label>
-      <input type="number" id="concurrency" min="1" max="12" step="1">
-      <p class="muted">Lower this if the campus network throttles you or downloads
-        keep failing partway.</p>
-    </div>
+    <section class="group" aria-labelledby="g-where">
+      <h2 id="g-where">Where files go</h2>
 
-    <p class="saved" id="saved" role="status" hidden>Saved</p>
+      <div class="field">
+        <span class="label">Save to</span>
+        <div class="picked">
+          <span id="rootName">Your Downloads folder</span>
+          <button type="button" class="ghost" id="chooseRoot">Choose folder…</button>
+          <button type="button" class="ghost" id="clearRoot" hidden>Use Downloads</button>
+        </div>
+        <p class="muted" id="rootHint">Pick any folder on your computer. EchoFetch will
+          keep saving there.</p>
+      </div>
+
+      <div class="field">
+        <label for="downloadFolder">Subfolder</label>
+        <input type="text" id="downloadFolder" spellcheck="false" placeholder="Lectures">
+        <p class="muted">Optional, and created for you — for example
+          <code>School/Psych</code>. Leave it empty to save straight into the folder
+          above.</p>
+      </div>
+
+      <div class="field">
+        <label for="filenameTemplate">File name</label>
+        <input type="text" id="filenameTemplate" spellcheck="false">
+        <p class="muted">Use <code>{title}</code> and <code>{date}</code>. The file
+          extension is added for you.</p>
+      </div>
+
+      <label class="check">
+        <input type="checkbox" id="askEachTime">
+        <span>
+          <span class="check-title">Ask me where to save each time</span>
+          <span class="muted">Chrome opens its save dialog instead, and the folder above
+            is ignored. Leave this off to save without being asked.</span>
+        </span>
+      </label>
+    </section>
+
+    <section class="group" aria-labelledby="g-rules">
+      <h2 id="g-rules">Send a course to its own folder</h2>
+      <p class="muted">Each rule looks for a word in the lecture title, or in the page
+        address when the title changes week to week. The first rule that matches wins;
+        anything unmatched goes to the folder above.</p>
+
+      <ul class="rules" id="rules" role="list"></ul>
+      <p class="muted empty" id="rules-empty">No rules yet.</p>
+      <button type="button" class="ghost add" id="add-rule">Add a rule</button>
+    </section>
+
+    <section class="group" aria-labelledby="g-watch">
+      <h2 id="g-watch">Watched courses</h2>
+      <p class="muted">EchoFetch checks these while Chrome is open and downloads each new
+        lecture as it appears — the video and the transcript together, into the folder you
+        give the course. Nothing has to be open and no page is reloaded.</p>
+
+      <div class="picked">
+        <button type="button" class="ghost" id="findCourses">Find my courses</button>
+        <span class="muted" id="findHint">Reads the courses you are enrolled in from
+          Echo360.</span>
+      </div>
+
+      <ul class="courses" id="courses" role="list"></ul>
+      <p class="muted empty" id="courses-empty">No courses watched yet.</p>
+
+      <div class="field">
+        <label for="courseUrl">Or paste a course address</label>
+        <div class="picked">
+          <input type="text" id="courseUrl" spellcheck="false"
+            placeholder="https://echo360.ca/section/…/home" aria-label="Course address">
+          <button type="button" class="ghost" id="addCourse">Watch</button>
+        </div>
+        <p class="muted" id="addHint">Open the course in Echo360 and copy the address from
+          the bar.</p>
+      </div>
+
+      <label class="check">
+        <input type="checkbox" id="notifyOnDownload">
+        <span>
+          <span class="check-title">Tell me when a lecture arrives</span>
+          <span class="muted">A notification per finished lecture, and one when Echo360
+            signs you out and checking stops.</span>
+        </span>
+      </label>
+    </section>
+
+    <section class="group" aria-labelledby="g-activity">
+      <h2 id="g-activity">Recent activity</h2>
+      <ul class="activity" id="activity" role="list"></ul>
+      <p class="muted empty" id="activity-empty">Nothing downloaded automatically yet.</p>
+    </section>
+
+    <section class="group" aria-labelledby="g-network">
+      <h2 id="g-network">Network</h2>
+
+      <div class="field">
+        <label for="concurrency">Pieces downloaded at once</label>
+        <input type="number" id="concurrency" min="1" max="12" step="1">
+        <p class="muted">Lower this if campus Wi-Fi throttles you or downloads keep
+          failing partway.</p>
+      </div>
+    </section>
   </main>
+
+  <template id="tpl-rule">
+    <li class="rule">
+      <select class="rule-kind" aria-label="Match against">
+        <option value="title">Title contains</option>
+        <option value="url">Address contains</option>
+      </select>
+      <input type="text" class="rule-match" spellcheck="false" placeholder="PSYCH 1X03" aria-label="Text to look for">
+      <span class="arrow" aria-hidden="true">→</span>
+      <input type="text" class="rule-folder" spellcheck="false" placeholder="School/Psych" aria-label="Folder">
+      <button type="button" class="remove" aria-label="Remove this rule">Remove</button>
+    </li>
+  </template>
+
+  <template id="tpl-course">
+    <li class="course">
+      <div class="course-head">
+        <span class="course-name" data-label></span>
+        <label class="course-enabled">
+          <input type="checkbox" class="course-toggle">
+          <span>On</span>
+        </label>
+        <button type="button" class="remove" data-remove aria-label="Stop watching this course">Remove</button>
+      </div>
+      <div class="course-fields">
+        <label class="sr-only" data-folder-label>Folder</label>
+        <input type="text" class="course-folder" spellcheck="false" placeholder="School/SOCPSY" aria-label="Folder for this course">
+        <select class="course-quality" aria-label="Size for this course">
+          <option value="">Default size</option>
+          <option value="360">360p</option>
+          <option value="480">480p</option>
+          <option value="720">720p</option>
+          <option value="1080">1080p</option>
+          <option value="9999">Largest</option>
+        </select>
+        <select class="course-poll" aria-label="How often to check">
+          <option value="15">Every 15 min</option>
+          <option value="30">Every 30 min</option>
+          <option value="60">Hourly</option>
+          <option value="180">Every 3 hours</option>
+          <option value="720">Twice a day</option>
+        </select>
+      </div>
+      <label class="check course-check">
+        <input type="checkbox" class="course-transcript">
+        <span><span class="check-title">Transcript too</span></span>
+      </label>
+      <p class="muted course-status" data-status></p>
+      <button type="button" class="ghost" data-resume hidden>Check again now</button>
+    </li>
+  </template>
+
+  <template id="tpl-found">
+    <li class="course found">
+      <div class="course-head">
+        <span class="course-name" data-label></span>
+        <button type="button" class="ghost" data-watch>Watch</button>
+      </div>
+    </li>
+  </template>
+
+  <template id="tpl-activity">
+    <li class="activity-row">
+      <span class="activity-title" data-title></span>
+      <span class="muted" data-detail></span>
+      <button type="button" class="remove" data-forget hidden>Download again</button>
+    </li>
+  </template>
 
   <script type="module" src="options.js"></script>
 </body>
