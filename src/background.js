@@ -105,6 +105,8 @@ async function startDownload({
   kind = 'video',
   ledgerKey = null,
   folder = null,
+  destinations = null,
+  quarantineReason = null,
   concurrency = null
 }) {
   const job = {
@@ -118,6 +120,11 @@ async function startDownload({
     // the folder its course was given, which beats the ordinary rules.
     ledgerKey,
     folder,
+    // Set only for a course using deterministic naming (src/naming.js): the exact
+    // video/transcript/audio destinations src/batch.js already worked out, which
+    // beats folder and the filename template both.
+    destinations,
+    quarantineReason,
     withAudio: Boolean(audioUrl),
     done: 0,
     total: 0,
@@ -138,6 +145,7 @@ async function startDownload({
       format,
       jobId: job.id,
       kind,
+      quarantineReason,
       concurrency: concurrency || settings.concurrency
     });
   } catch (error) {
@@ -173,6 +181,30 @@ function saveFile(url, filename, saveAs) {
  * and differing only by extension, so `tools/merge-audio.mjs` and the offered ffmpeg
  * command can pair them without guessing.
  */
+/**
+ * Which of a naming-aware job's destinations a given assembled file belongs under.
+ * The transcript gets its own; a quarantine reason file follows whichever primary
+ * media it was written about; everything else — the video, or the audio half of a
+ * pair the muxer could not combine — follows the video destination, unless the job
+ * itself is an audio-only download, in which case it follows the audio one.
+ */
+function destinationFor(destinations, job, file) {
+  if (!destinations) return null;
+  if (file.role === 'transcript') return destinations.transcript;
+  const primary = job?.kind === 'audio' ? destinations.audio : destinations.video;
+  if (file.role === 'quarantine-reason') return primary;
+  return primary;
+}
+
+function pathFor(destination, file) {
+  if (!destination) return null;
+  if (file.role === 'quarantine-reason') {
+    return destination.reasonPath || `${destination.path}.reason.txt`;
+  }
+  const stem = destination.filename.replace(/\.[^./]+$/, '');
+  return `${destination.folder}/${stem}.${file.extension}`;
+}
+
 async function deliver({ files }) {
   let job = await readJob();
   const settings = await getSettings();
@@ -184,10 +216,15 @@ async function deliver({ files }) {
   );
   // A per-course rule beats the default folder. Both are relative: to the folder
   // chosen in Settings when there is one, and otherwise to the browser's download
-  // directory, which is as far as chrome.downloads on its own can reach.
+  // directory, which is as far as chrome.downloads on its own can reach. A course
+  // using deterministic naming (src/naming.js) skips all of this: its destinations
+  // were already worked out by src/batch.js when the lecture was queued.
   const folder = job?.folder ?? resolveFolder(job?.title, job?.url, settings);
   const prefix = folder ? `${folder}/` : '';
-  const paths = files.map((file) => `${prefix}${stem}.${file.extension}`);
+  const paths = files.map((file) => {
+    const destination = destinationFor(job?.destinations, job, file);
+    return destination ? pathFor(destination, file) : `${prefix}${stem}.${file.extension}`;
+  });
 
   // Chrome's own save dialog picks the location itself, so the chosen folder is not
   // consulted when the user asked to be asked.

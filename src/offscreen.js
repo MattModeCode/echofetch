@@ -265,7 +265,16 @@ async function downloadTranscript({ transcriptUrl, format, formats, jobId }) {
   });
 }
 
-async function download({ variantUrl, audioUrl, transcriptUrl, transcriptFormats, jobId, kind, concurrency }) {
+async function download({
+  variantUrl,
+  audioUrl,
+  transcriptUrl,
+  transcriptFormats,
+  jobId,
+  kind,
+  concurrency,
+  quarantineReason
+}) {
   cancelled = false;
   keyCache.clear();
   assembled = [];
@@ -314,6 +323,14 @@ async function download({ variantUrl, audioUrl, transcriptUrl, transcriptFormats
     } catch (error) {
       console.warn('EchoFetch: no transcript for this lecture.', error);
     }
+  }
+
+  // A lecture the quarantine guard rejected still downloads — quarantine only ever
+  // means "file it somewhere else and say why", never "do not fetch it" — so the
+  // reason rides along as its own small text file, written beside it.
+  if (quarantineReason) {
+    const blob = new Blob([quarantineReason], { type: 'text/plain' });
+    files.push({ blob, blobUrl: URL.createObjectURL(blob), extension: 'reason.txt', role: 'quarantine-reason' });
   }
 
   assembled = files.map((file) => file.blob);
@@ -372,7 +389,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             transcriptFormats: message.transcriptFormats || null,
             jobId: message.jobId,
             kind: message.kind || 'video',
-            concurrency: message.concurrency || DEFAULT_CONCURRENCY
+            concurrency: message.concurrency || DEFAULT_CONCURRENCY,
+            quarantineReason: message.quarantineReason || null
           });
 
     run.catch((error) => {

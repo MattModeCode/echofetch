@@ -39,6 +39,18 @@ test('normalizeCourse fills the defaults and keeps overrides unset', () => {
   assert.equal(course.includeAudio, null);
   assert.equal(course.enabled, true);
   assert.equal(course.pollMinutes, 60);
+  assert.equal(course.courseFolder, '');
+  assert.equal(course.courseCode, '');
+});
+
+test('normalizeCourse trims a courseFolder/courseCode pair when given one', () => {
+  const course = normalizeCourse({
+    sectionId: SECTION,
+    courseFolder: ' PHYSICS 1D03 ',
+    courseCode: ' PHYSICS 1D03 '
+  });
+  assert.equal(course.courseFolder, 'PHYSICS 1D03');
+  assert.equal(course.courseCode, 'PHYSICS 1D03');
 });
 
 test('normalizeCourse derives the section id from a URL when none is given', () => {

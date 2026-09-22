@@ -98,7 +98,8 @@ async function harness(options = {}) {
         host: 'echo360.ca',
         label: 'SOCPSY 1Z03',
         folder: 'School/SOCPSY',
-        transcript: true
+        transcript: true,
+        ...(options.course || {})
       }
     ]
   });
@@ -241,4 +242,54 @@ test('watching a course arms the alarm and asks for a check now', async () => {
   await watcher.ensureAlarm();
   assert.equal(globalThis.chrome.alarms.created[0].name, watcher.ALARM);
   assert.equal(globalThis.chrome.alarms.created[0].spec.periodInMinutes, watcher.TICK_MINUTES);
+});
+
+test('a course with courseFolder set downloads under the deterministic naming scheme', async () => {
+  const { watcher, deps, started } = await harness({
+    course: { courseFolder: 'SOCPSY 1Z03', courseCode: 'SOCPSY 1Z03' }
+  });
+  await watcher.tick(deps);
+
+  const job = started[0];
+  const { ledger } = await watcher.readState();
+  const entry = ledger[job.ledgerKey];
+
+  assert.ok(entry.ordinal === 1 || entry.ordinal === 2, 'one of the two ready lectures');
+  assert.equal(job.destinations.video.folder, '_media/recordings');
+  assert.match(job.destinations.video.filename, /^SOCPSY-1Z03-L0[12]-2026-09-(08|15)\.mp4$/);
+  assert.equal(job.destinations.transcript.folder, '_media/transcripts');
+  assert.equal(job.quarantineReason, null, 'course code matches, so nothing is quarantined');
+});
+
+test('pollDue reports how many lectures a batch run newly queued', async () => {
+  const { watcher } = await harness({
+    course: { courseFolder: 'SOCPSY 1Z03', courseCode: 'SOCPSY 1Z03' }
+  });
+  const result = await watcher.pollDue();
+  assert.equal(result.polled, 1);
+  // Two lectures are ready and one is still processing; all three get a ledger
+  // entry, and none of them is quarantined against this course.
+  assert.equal(result.newlyQueued, 3);
+  assert.equal(result.quarantined, 0);
+
+  // Polling again finds nothing new — the ledger already knows all three.
+  const again = await watcher.pollDue();
+  assert.equal(again.newlyQueued, 0);
+});
+
+test('a course-code mismatch quarantines the lecture instead of filing it', async () => {
+  const { watcher, deps, started } = await harness({
+    course: { courseFolder: 'MATH 1ZC3', courseCode: 'SOCPSY 1Z03', folder: 'School/MATH1ZC3' }
+  });
+  const polled = await watcher.pollDue();
+  // The two ready lectures are quarantined for the course-code mismatch; the
+  // still-processing lecture is not covered by the batch plan at all, so it is
+  // ledgered normally and counts as queued, not quarantined.
+  assert.equal(polled.newlyQueued, 1);
+  assert.equal(polled.quarantined, 2);
+
+  await watcher.tick(deps);
+  const job = started[0];
+  assert.equal(job.destinations.video.folder, '_media/_quarantine');
+  assert.match(job.quarantineReason, /SOCPSY 1Z03/);
 });

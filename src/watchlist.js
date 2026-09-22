@@ -26,7 +26,15 @@ export const COURSE_DEFAULTS = {
   audioOnly: null,
   transcript: false,
   enabled: true,
-  pollMinutes: 60
+  pollMinutes: 60,
+  // The First Year course folder this course maps to — e.g. "SOCPSY 1Z03" — and the
+  // course code Echo360's own section record reports for it. Set together: leaving
+  // courseFolder blank keeps this course on the old template/rule-based filename and
+  // folder behaviour untouched. Set, it switches to the deterministic
+  // <COURSE>-L<NN>-<date> naming in src/naming.js and the quarantine guard in
+  // src/quarantine.js. See src/batch.js for the five recognised course folders.
+  courseFolder: '',
+  courseCode: ''
 };
 
 /**
@@ -88,7 +96,9 @@ export function normalizeCourse(raw) {
     audioOnly: coerceFlag(raw?.audioOnly),
     transcript: Boolean(raw?.transcript),
     enabled: raw?.enabled === undefined ? true : Boolean(raw.enabled),
-    pollMinutes: Number(raw?.pollMinutes) || COURSE_DEFAULTS.pollMinutes
+    pollMinutes: Number(raw?.pollMinutes) || COURSE_DEFAULTS.pollMinutes,
+    courseFolder: String(raw?.courseFolder ?? '').trim(),
+    courseCode: String(raw?.courseCode ?? '').trim()
   };
 }
 

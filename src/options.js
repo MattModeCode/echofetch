@@ -1,6 +1,8 @@
 import { getSettings, saveSettings, sanitizeFolder, DEFAULTS } from './settings.js';
 import { listEnrollments, SessionExpiredError } from './echo360.js';
 import { normalizeCourse, parseSectionId, removeCourse, upsertCourse } from './watchlist.js';
+import { TARGET_COURSES } from './batch.js';
+import { normalizeCourseCode } from './quarantine.js';
 import {
   canPickFolder,
   chooseRoot,
@@ -278,6 +280,19 @@ async function watchCourse(course) {
   await showCourses();
 }
 
+/**
+ * A First Year course folder this section is recognisably one of, or null. Matched
+ * by course code alone, so it survives however the term happens to spell it — a
+ * section named "MATH-1ZC3" or "math 1zc3 c02" still finds "MATH 1ZC3". Only these
+ * five turn on deterministic naming (src/naming.js) and the quarantine guard
+ * (src/quarantine.js); every other watched course keeps working exactly as it did.
+ */
+function matchTargetCourse(courseCode) {
+  const normalized = normalizeCourseCode(courseCode);
+  if (!normalized) return null;
+  return TARGET_COURSES.find((name) => normalizeCourseCode(name) === normalized) || null;
+}
+
 /** Asks every known Echo360 host and keeps the first that answers with a session. */
 async function findCourses() {
   findHint.textContent = 'Looking…';
@@ -310,9 +325,18 @@ async function findCourses() {
   for (const section of unwatched) {
     const row = foundTemplate.content.cloneNode(true).firstElementChild;
     const label = [section.courseCode, section.courseName].filter(Boolean).join(' — ');
+    const courseFolder = matchTargetCourse(section.courseCode);
     row.querySelector('[data-label]').textContent = label || section.sectionId;
     row.querySelector('[data-watch]').addEventListener('click', () =>
-      watchCourse({ sectionId: section.sectionId, host: hit.host, label })
+      watchCourse({
+        sectionId: section.sectionId,
+        host: hit.host,
+        label,
+        // One of the five First Year courses turns on deterministic naming and the
+        // quarantine guard; anything else keeps the folder/template behaviour.
+        courseFolder: courseFolder || '',
+        courseCode: courseFolder ? section.courseCode : ''
+      })
     );
     coursesList.append(row);
   }

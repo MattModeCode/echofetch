@@ -135,6 +135,27 @@ School/SOCPSY/SOCPSY 1Z03 Conformity.txt     transcript, plain text
   — and Settings says the folder needs reconnecting.
 - Everything under **Limits** below still applies, DRM especially.
 
+### Batch mode
+
+**Find my courses** turns this on automatically: when a section's own course code
+matches one of the five recognised First Year courses (`MATH 1ZC3`, `PHYSICS 1D03`,
+`SOCPSY 1Z03`, `MATH 1ZA3`, `ENGINEER 1P13`), that course is watched with
+deterministic naming and course-scoped batch fetching instead of the ordinary
+folder-rule/template behaviour above. Every poll then enumerates the whole course,
+names each lecture `<COURSE>-L<NN>-<date>` from its position in the term, and files
+its video and transcript under `_media/recordings/` and `_media/transcripts/` —
+sharing one stem, matching the naming already used for the transcripts on disk. A
+course added by pasting its address, or one that does not match any of the five, gets
+the ordinary behaviour instead. See `docs/BATCH.md`.
+
+A lecture whose date falls outside the course's term, or whose Echo360 section
+reports a different course than the one it was fetched for, is quarantined instead of
+filed: written into `_media/_quarantine/` with a `<name>.reason.txt` explaining why,
+rather than silently landing in the wrong place. Nothing is ever deleted.
+`tools/quarantine-recordings.mjs` applies the same check to recordings already on
+disk from before this existed. SOCPSY 1Z03 is never quarantined, matching the course
+directory's own rule that its recordings are never deleted. See `docs/QUARANTINE.md`.
+
 ## Transcript
 
 Echo360 writes a transcript for most lectures. EchoFetch downloads that transcript —

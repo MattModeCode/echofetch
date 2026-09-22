@@ -24,6 +24,7 @@ import * as schedule from './schedule.js';
 import { readCourses, resolveCourseFolder, resolveCourseSettings } from './watchlist.js';
 import { buildOptions, pickDefault } from './streams.js';
 import { getSettings } from './settings.js';
+import { planCourseBatch } from './batch.js';
 
 export const ALARM = 'echofetch-watch';
 export const TICK_MINUTES = 5;
@@ -101,11 +102,41 @@ export async function resolveOptions(course, entry, { getCaptured }) {
   }
 }
 
+/**
+ * The naming and quarantine decision for every ledger entry this course's batch plan
+ * covers, folded in as extra fields rather than replacing the entry — the queue state
+ * machine in queue.js still owns state, attempts and timing, this only adds where a
+ * lecture belongs once it downloads. Only runs for a course that opted into
+ * deterministic naming by setting courseFolder; every other watched course keeps the
+ * template/folder-rule behaviour it always had.
+ */
+function annotateWithBatchPlan(ledger, course, lectures, { now } = {}) {
+  if (!course.courseFolder) return ledger;
+  const plan = planCourseBatch(course, lectures, { now });
+  let next = ledger;
+  for (const item of plan) {
+    if (!next[item.key]) continue;
+    next = {
+      ...next,
+      [item.key]: {
+        ...next[item.key],
+        ordinal: item.ordinal,
+        video: item.video,
+        transcript: item.transcript,
+        audio: item.audio,
+        quarantine: item.quarantine
+      }
+    };
+  }
+  return next;
+}
+
 /** One course: ask what it holds, queue what is new, park what is not ready. */
 export async function pollCourse(course, ledger, { now = Date.now() } = {}) {
   const lectures = await listLectures(originFor(course), course.sectionId);
   const withMedia = lectures.filter((lecture) => lecture.mediaId);
   let next = queue.ingest(ledger, withMedia, { sectionId: course.sectionId, now });
+  next = annotateWithBatchPlan(next, course, withMedia, { now });
 
   for (const lecture of withMedia) {
     if (isDownloadable(lecture)) continue;
@@ -120,11 +151,19 @@ export async function pollCourse(course, ledger, { now = Date.now() } = {}) {
   return { ledger: next, found: withMedia.length };
 }
 
+/**
+ * Polls every due course — which, for a course on the watchlist with a courseFolder
+ * set, is the course-scoped batch fetch: enumerate its lectures, name and place each
+ * one, quarantine what does not belong, and queue the rest. `newlyQueued` and
+ * `quarantined` count only entries this call itself added, so a scheduled tick can
+ * report "3 new, 1 quarantined" instead of the whole term's running total.
+ */
 export async function pollDue({ now = Date.now() } = {}) {
   const courses = await readWatchedCourses();
-  if (!courses.length) return { polled: 0 };
+  if (!courses.length) return { polled: 0, newlyQueued: 0, quarantined: 0 };
 
   let { ledger, states } = await readState();
+  const before = new Set(Object.keys(ledger));
   const due = schedule.dueCourses(courses, states, now);
 
   for (const course of due) {
@@ -145,7 +184,16 @@ export async function pollDue({ now = Date.now() } = {}) {
   }
 
   await writeState({ ledger, states });
-  return { polled: due.length };
+
+  let newlyQueued = 0;
+  let quarantined = 0;
+  for (const [key, entry] of Object.entries(ledger)) {
+    if (before.has(key)) continue;
+    if (entry.quarantine?.quarantine) quarantined += 1;
+    else newlyQueued += 1;
+  }
+
+  return { polled: due.length, newlyQueued, quarantined };
 }
 
 async function currentJob() {
@@ -197,6 +245,13 @@ export async function pump({ startDownload, getCaptured, now = Date.now() } = {}
     });
     if (!chosen) throw new Error('Found a playlist but could not read it.');
 
+    // A course with deterministic naming (see src/batch.js) carries its own
+    // video/transcript destinations on the ledger entry, computed at poll time. Every
+    // other watched course keeps the folder-rule/template behaviour it always had.
+    const destinations = entry.video
+      ? { video: entry.video, transcript: entry.transcript, audio: entry.audio }
+      : null;
+
     await startDownload({
       variantUrl: chosen.url,
       audioUrl: resolved.includeAudio ? chosen.audioUrl || null : null,
@@ -209,6 +264,8 @@ export async function pump({ startDownload, getCaptured, now = Date.now() } = {}
       title: entry.title,
       pageUrl: classroomUrl(origin, entry.lessonId),
       folder: resolveCourseFolder(course, { title: entry.title, url: classroomUrl(origin, entry.lessonId) }, settings),
+      destinations,
+      quarantineReason: entry.quarantine?.quarantine ? entry.quarantine.reason : null,
       kind: chosen.kind,
       ledgerKey: entry.key,
       concurrency: resolved.concurrency
@@ -251,10 +308,13 @@ export async function settle(key, { ok, error = null, filenames = [], savedTo = 
   });
 }
 
-/** One tick: poll whatever is due, then move the queue along by one lecture. */
+/** One tick: poll whatever is due — the batch fetch for every due course — then move
+ * the queue along by one lecture. The poll counts ride along on the return value, so
+ * whatever calls tick() can report "3 new, 1 quarantined" without polling again. */
 export async function tick(deps) {
-  await pollDue();
-  return pump(deps);
+  const polled = await pollDue();
+  const pumped = await pump(deps);
+  return { ...pumped, polled: polled.polled, newlyQueued: polled.newlyQueued, quarantined: polled.quarantined };
 }
 
 export async function ensureAlarm() {
